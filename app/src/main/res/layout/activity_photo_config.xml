@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#FFFFFF">
+
+<androidx.constraintlayout.widget.ConstraintLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Configuración Foto"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="#6200EE"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <TextView
+        android:id="@+id/filter_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Filtro"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/title"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="48dp" />
+
+    <Spinner
+        android:id="@+id/spinner_filter"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:background="@android:drawable/btn_dropdown"
+        android:padding="12dp"
+        android:spinnerMode="dropdown"
+        app:layout_constraintTop_toBottomOf="@id/filter_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/frame_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Marco Decorativo"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/spinner_filter"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_select_frame"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="🖼️ Seleccionar Marco"
+        android:textSize="16sp"
+        app:icon="@android:drawable/ic_menu_camera"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        app:layout_constraintTop_toBottomOf="@id/frame_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/frame_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/button_select_frame"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        android:id="@+id/background_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Fondo Virtual"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/frame_status"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_select_background"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="🌄 Seleccionar Fondo"
+        android:textSize="16sp"
+        app:icon="@android:drawable/ic_menu_gallery"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        app:layout_constraintTop_toBottomOf="@id/background_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/background_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/button_select_background"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/switch_remove_background"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Eliminar fondo (ML Kit)"
+        android:textSize="16sp"
+        app:layout_constraintTop_toBottomOf="@id/background_status"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/mode_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Modo"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/switch_remove_background"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/switch_photo_booth"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Fotomatón (4 fotos)"
+        android:textSize="18sp"
+        app:layout_constraintTop_toBottomOf="@id/mode_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <Button
+        android:id="@+id/button_start"
+        android:layout_width="0dp"
+        android:layout_height="64dp"
+        android:text="Comenzar"
+        android:textSize="20sp"
+        app:layout_constraintTop_toBottomOf="@id/switch_photo_booth"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="48dp"
+        android:layout_marginBottom="32dp" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+
+</ScrollView>

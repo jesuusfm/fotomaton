@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="¿Cómo deseas compartir?"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="#000000"
+        android:layout_marginBottom="24dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_email"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="📧 Enviar por Email ahora"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        app:icon="@android:drawable/ic_dialog_email"
+        app:iconGravity="textStart"
+        style="@style/Widget.Material3.Button.ElevatedButton"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_whatsapp"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="💬 Enviar por WhatsApp"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        app:icon="@android:drawable/ic_menu_share"
+        app:iconGravity="textStart"
+        style="@style/Widget.Material3.Button.ElevatedButton"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_whatsapp_direct"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="📱 Enviar a un número específico"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        app:icon="@android:drawable/ic_menu_send"
+        app:iconGravity="textStart"
+        style="@style/Widget.Material3.Button.TonalButton"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_save_contact"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="💾 Guardar contacto para enviar después"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        app:icon="@android:drawable/ic_menu_save"
+        app:iconGravity="textStart"
+        style="@style/Widget.Material3.Button.ElevatedButton"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_cancel"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Cancelar"
+        android:textSize="16sp"
+        style="@style/Widget.Material3.Button.TextButton"
+        xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+</LinearLayout>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace with actual stars frame PNG -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Stars border -->
+    <path
+        android:fillColor="#80FFD700"
+        android:pathData="M150,80 L170,120 L210,120 L180,145 L190,185 L150,160 L110,185 L120,145 L90,120 L130,120 Z"/>
+    
+</vector>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace this with your actual frame PNG file -->
+<!-- This file shows where frames should be placed -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Frame border example (replace with your PNG) -->
+    <path
+        android:fillColor="#8000FF00"
+        android:pathData="M50,50 L1030,50 L1030,1870 L50,1870 Z M150,150 L150,1770 L930,1770 L930,150 Z"/>
+    
+    <!-- Text label -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M400,960 L680,960 L680,980 L400,980 Z"/>
+    
+</vector>

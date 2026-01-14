@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace with actual forest background JPG -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Forest placeholder -->
+    <path
+        android:fillColor="#228B22"
+        android:pathData="M0,0 L1080,0 L1080,1920 L0,1920 Z"/>
+    <path
+        android:fillColor="#006400"
+        android:pathData="M200,800 L280,800 L240,600 Z"/>
+    <path
+        android:fillColor="#8B4513"
+        android:pathData="M220,800 L260,800 L260,1000 L220,1000 Z"/>
+    
+</vector>

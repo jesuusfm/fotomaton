@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace with actual hearts frame PNG -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Hearts border -->
+    <path
+        android:fillColor="#80FF1493"
+        android:pathData="M100,100 L150,50 L200,100 L150,150 Z"/>
+    <path
+        android:fillColor="#80FF1493"
+        android:pathData="M900,100 L950,50 L1000,100 L950,150 Z"/>
+    
+</vector>

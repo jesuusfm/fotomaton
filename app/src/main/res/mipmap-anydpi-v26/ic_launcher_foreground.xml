@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Camera icon centered and scaled for adaptive icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40.5,36h27l5.4,-7.2c1.2,-1.5 3,-2.4 4.8,-2.4h13.5c2.5,0 4.5,2 4.5,4.5v45c0,2.5 -2,4.5 -4.5,4.5h-72c-2.5,0 -4.5,-2 -4.5,-4.5v-45c0,-2.5 2,-4.5 4.5,-4.5h13.5c1.6,0 2.7,0.7 3.6,1.8L40.5,36z M54,72c8.8,0 15.8,-7 15.8,-15.8S62.8,40.5 54,40.5 38.2,47.5 38.2,56.2 45.2,72 54,72z M54,45c6.3,0 11.2,5 11.2,11.2S60.3,67.5 54,67.5 42.8,62.5 42.8,56.2 47.7,45 54,45z"/>
+</vector>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace with actual abstract background JPG -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Abstract gradient placeholder -->
+    <path
+        android:fillColor="#9C27B0"
+        android:pathData="M0,0 L1080,0 L1080,640 L0,640 Z"/>
+    <path
+        android:fillColor="#E91E63"
+        android:pathData="M0,640 L1080,640 L1080,1280 L0,1280 Z"/>
+    <path
+        android:fillColor="#FF5722"
+        android:pathData="M0,1280 L1080,1280 L1080,1920 L0,1920 Z"/>
+    
+</vector>

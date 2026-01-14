@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER: Replace with actual party frame PNG -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    
+    <!-- Party confetti border -->
+    <path
+        android:fillColor="#80FF0000"
+        android:pathData="M50,50 L1030,50 L1030,200 L50,200 Z"/>
+    <path
+        android:fillColor="#800000FF"
+        android:pathData="M50,1720 L1030,1720 L1030,1870 L50,1870 Z"/>
+    
+</vector>

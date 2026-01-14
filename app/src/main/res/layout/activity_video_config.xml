@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF">
+
+    <ScrollView
+        android:id="@+id/scroll_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/button_start"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="32dp">
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Configuración Video"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="#6200EE"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <TextView
+        android:id="@+id/filter_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Filtro"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/title"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="48dp" />
+
+    <Spinner
+        android:id="@+id/spinner_filter"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:background="@android:drawable/btn_dropdown"
+        android:padding="12dp"
+        android:spinnerMode="dropdown"
+        app:layout_constraintTop_toBottomOf="@id/filter_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/duration_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Duración del video"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/spinner_filter"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <TextView
+        android:id="@+id/duration_value"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="10 segundos"
+        android:textSize="18sp"
+        android:textColor="#6200EE"
+        app:layout_constraintTop_toBottomOf="@id/duration_label"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <SeekBar
+        android:id="@+id/seek_bar_duration"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:layout_constraintTop_toBottomOf="@id/duration_value"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/mode_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Modo de Cámara Lenta"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/seek_bar_duration"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <RadioGroup
+        android:id="@+id/radio_group_slow_motion"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:layout_constraintTop_toBottomOf="@id/mode_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp">
+
+        <RadioButton
+            android:id="@+id/radio_normal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Normal (1.0x)"
+            android:textSize="18sp"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/radio_slow_05x"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cámara Lenta 0.5x"
+            android:textSize="18sp" />
+
+        <RadioButton
+            android:id="@+id/radio_boomerang"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Boomerang (oscilante 0.5x-1.0x)"
+            android:textSize="18sp" />
+
+    </RadioGroup>
+
+    <!-- Boomerang parameters (hidden by default) -->
+    <LinearLayout
+        android:id="@+id/boomerang_params"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:background="#F5F5F5"
+        android:padding="16dp"
+        app:layout_constraintTop_toBottomOf="@id/radio_group_slow_motion"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Parámetros de Boomerang"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#6200EE" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Velocidad Mínima"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:id="@+id/min_speed_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0.5x"
+            android:textSize="14sp"
+            android:textColor="#6200EE" />
+
+        <SeekBar
+            android:id="@+id/seek_bar_min_speed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="50"
+            android:progress="20" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Velocidad Máxima"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:id="@+id/max_speed_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1.0x"
+            android:textSize="14sp"
+            android:textColor="#6200EE" />
+
+        <SeekBar
+            android:id="@+id/seek_bar_max_speed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="50"
+            android:progress="50" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Frecuencia de Oscilación"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:id="@+id/frequency_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0.10"
+            android:textSize="14sp"
+            android:textColor="#6200EE" />
+
+        <SeekBar
+            android:id="@+id/seek_bar_frequency"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="25"
+            android:progress="5" />
+
+    </LinearLayout>
+    
+    <TextView
+        android:id="@+id/frame_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Marco Decorativo"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/boomerang_params"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_select_frame"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="🖼️ Seleccionar Marco"
+        android:textSize="16sp"
+        app:icon="@android:drawable/ic_menu_camera"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        app:layout_constraintTop_toBottomOf="@id/frame_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/frame_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/button_select_frame"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <!-- Background section -->
+    <TextView
+        android:id="@+id/background_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Fondo Virtual"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/frame_status"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_select_background"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="🌄 Seleccionar Fondo"
+        android:textSize="16sp"
+        app:icon="@android:drawable/ic_menu_gallery"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        app:layout_constraintTop_toBottomOf="@id/background_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/background_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/button_select_background"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/switch_remove_background"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Eliminar fondo (post-proceso)"
+        android:textSize="16sp"
+        app:layout_constraintTop_toBottomOf="@id/background_status"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/background_warning"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="⚠️ El procesamiento de fondo en video puede tardar varios minutos"
+        android:textSize="12sp"
+        android:textColor="#FF6600"
+        app:layout_constraintTop_toBottomOf="@id/switch_remove_background"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <!-- Face Filter section -->
+    <TextView
+        android:id="@+id/face_filter_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Filtros Faciales"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        app:layout_constraintTop_toBottomOf="@id/background_warning"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_select_face_filter"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="🎭 Seleccionar Filtro Facial"
+        android:textSize="16sp"
+        app:icon="@android:drawable/ic_menu_myplaces"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        app:layout_constraintTop_toBottomOf="@id/face_filter_label"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/face_filter_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/button_select_face_filter"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        android:id="@+id/face_filter_info"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="🎩 Bigotes, gorros, máscaras y más para las caras detectadas"
+        android:textSize="12sp"
+        android:textColor="#666666"
+        app:layout_constraintTop_toBottomOf="@id/face_filter_status"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="32dp" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </ScrollView>
+
+    <Button
+        android:id="@+id/button_start"
+        android:layout_width="0dp"
+        android:layout_height="64dp"
+        android:text="Comenzar"
+        android:textSize="20sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="16dp" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
