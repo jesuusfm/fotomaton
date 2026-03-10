@@ -269,66 +269,12 @@ class CameraActivity : AppCompatActivity() {
                     else -> Quality.FHD
                 }
                 
-                // Get camera info for selected camera
-                val targetCameraInfo = try {
-                    cameraSelector.filter(cameraProvider.availableCameraInfos).firstOrNull()
-                } catch (e: Exception) {
-                    cameraProvider.availableCameraInfos.firstOrNull()
-                }
-                
-                // Check supported qualities
-                val supportedQualities = if (targetCameraInfo != null) {
-                    QualitySelector.getSupportedQualities(targetCameraInfo)
-                } else {
-                    listOf(Quality.HD) // Default fallback
-                }
-                
-                val qualityNames = supportedQualities.map { q ->
-                    when (q) {
-                        Quality.SD -> "SD(480p)"
-                        Quality.HD -> "HD(720p)"
-                        Quality.FHD -> "FHD(1080p)"
-                        Quality.UHD -> "4K(2160p)"
-                        else -> q.toString()
-                    }
-                }
-                android.util.Log.d("CameraActivity", "Calidades soportadas: ${qualityNames.joinToString(", ")}")
-                
-                // Determine actual quality that will be used
-                val actualQuality = if (supportedQualities.contains(requestedQuality)) {
-                    requestedQuality
-                } else {
-                    // Find fallback - prefer higher quality
-                    supportedQualities.firstOrNull() ?: Quality.HD
-                }
-                
-                val requestedName = when (requestedQuality) {
-                    Quality.SD -> "SD(480p)"
-                    Quality.HD -> "HD(720p)"
-                    Quality.FHD -> "FHD(1080p)"
-                    Quality.UHD -> "4K(2160p)"
-                    else -> requestedQuality.toString()
-                }
-                val actualName = when (actualQuality) {
-                    Quality.SD -> "SD(480p)"
-                    Quality.HD -> "HD(720p)"
-                    Quality.FHD -> "FHD(1080p)"
-                    Quality.UHD -> "4K(2160p)"
-                    else -> actualQuality.toString()
-                }
-                
-                android.util.Log.d("CameraActivity", "Calidad solicitada: $requestedName, Calidad real: $actualName")
-                
-                // Show toast with actual quality
-                if (requestedQuality != actualQuality) {
-                    Toast.makeText(this, "⚠️ $requestedName no soportado. Usando $actualName", Toast.LENGTH_LONG).show()
-                } else {
-                    Toast.makeText(this, "📹 Grabando en $actualName", Toast.LENGTH_SHORT).show()
-                }
-                
-                // Use actualQuality (the one that's actually supported)
-                val qualitySelector = QualitySelector.from(actualQuality, FallbackStrategy.higherQualityOrLowerThan(Quality.SD))
-                android.util.Log.d("CameraActivity", "QualitySelector creado con: $actualName")
+                // Let CameraX pick the best available quality (handles front/back camera differences correctly)
+                val qualitySelector = QualitySelector.fromOrderedList(
+                    listOf(requestedQuality, Quality.UHD, Quality.FHD, Quality.HD, Quality.SD),
+                    FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                )
+                android.util.Log.d("CameraActivity", "QualitySelector solicitado: $videoQuality")
                 
                 val recorder = Recorder.Builder()
                     .setQualitySelector(qualitySelector)
@@ -889,7 +835,7 @@ class CameraActivity : AppCompatActivity() {
             intent.putExtra("SLOW_MOTION_MODE", slowMotionMode)
             if (slowMotionMode == "0.5x") {
                 intent.putExtra("PLAYBACK_SPEED", 0.5f)
-            } else if (slowMotionMode == "boomerang") {
+            } else if (slowMotionMode == "boomerang" || slowMotionMode == "boomerang_reverse") {
                 intent.putExtra("BOOMERANG_MIN_SPEED", boomerangMinSpeed)
                 intent.putExtra("BOOMERANG_MAX_SPEED", boomerangMaxSpeed)
                 intent.putExtra("BOOMERANG_SLOW_DURATION", boomerangFrequency)

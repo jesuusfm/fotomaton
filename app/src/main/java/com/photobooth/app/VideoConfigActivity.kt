@@ -62,14 +62,11 @@ class VideoConfigActivity : AppCompatActivity() {
                 if (backgroundMode != "none") {
                     binding.backgroundStatus.text = "✓ Fondo: $theme"
                     binding.backgroundStatus.visibility = View.VISIBLE
-                    // Auto-enable background removal
                     removeBackground = true
-                    binding.switchRemoveBackground.isChecked = true
                 } else {
                     binding.backgroundStatus.text = ""
                     binding.backgroundStatus.visibility = View.GONE
                     removeBackground = false
-                    binding.switchRemoveBackground.isChecked = false
                 }
             }
         }
@@ -140,11 +137,16 @@ class VideoConfigActivity : AppCompatActivity() {
                 R.id.radio_boomerang_reverse -> "boomerang_reverse"
                 else -> "normal"
             }
-            // Show/hide boomerang parameters (only for oscillating mode)
-            binding.boomerangParams.visibility = if (slowMotionMode == "boomerang") {
-                android.view.View.VISIBLE
+            // Show/hide boomerang parameters and update title
+            if (slowMotionMode == "boomerang" || slowMotionMode == "boomerang_reverse") {
+                binding.boomerangParams.visibility = android.view.View.VISIBLE
+                binding.boomerangParamsTitle.text = if (slowMotionMode == "boomerang") {
+                    "Parámetros Oscilante"
+                } else {
+                    "Parámetros Boomerang"
+                }
             } else {
-                android.view.View.GONE
+                binding.boomerangParams.visibility = android.view.View.GONE
             }
         }
 
@@ -215,11 +217,6 @@ class VideoConfigActivity : AppCompatActivity() {
             backgroundPreviewLauncher.launch(intent)
         }
         
-        // Remove background switch
-        binding.switchRemoveBackground.setOnCheckedChangeListener { _, isChecked ->
-            removeBackground = isChecked
-        }
-
         binding.buttonStart.setOnClickListener {
             android.util.Log.d("VideoConfigActivity", "=== INICIANDO CÁMARA ===")
             android.util.Log.d("VideoConfigActivity", "videoQuality=$videoQuality")

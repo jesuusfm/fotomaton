@@ -20,6 +20,8 @@ import java.io.File
 class EventGalleryActivity : AppCompatActivity() {
     private lateinit var binding: ActivityEventGalleryBinding
     private lateinit var eventName: String
+    private val mediaItems = mutableListOf<MediaItem>()
+    private var currentFilter = "all"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +42,16 @@ class EventGalleryActivity : AppCompatActivity() {
         }
 
         loadEventMedia()
+
+        binding.chipAll.setOnCheckedChangeListener { _, checked ->
+            if (checked) { currentFilter = "all"; filterAndDisplay() }
+        }
+        binding.chipPhotos.setOnCheckedChangeListener { _, checked ->
+            if (checked) { currentFilter = "photo"; filterAndDisplay() }
+        }
+        binding.chipVideos.setOnCheckedChangeListener { _, checked ->
+            if (checked) { currentFilter = "video"; filterAndDisplay() }
+        }
     }
 
     override fun onResume() {
@@ -58,8 +70,20 @@ class EventGalleryActivity : AppCompatActivity() {
         }
     }
 
+    private fun filterAndDisplay() {
+        val filtered = if (currentFilter == "all") mediaItems
+                       else mediaItems.filter { it.type == currentFilter }
+        val label = when (currentFilter) {
+            "photo" -> "fotos"
+            "video" -> "vídeos"
+            else -> "archivos"
+        }
+        binding.mediaCount.text = "${filtered.size} $label"
+        binding.recyclerViewMedia.adapter = MediaAdapter(filtered)
+    }
+
     private fun loadEventMedia() {
-        val mediaItems = mutableListOf<MediaItem>()
+        mediaItems.clear()
         
         // Load photos
         val photoProjection = arrayOf(
@@ -141,9 +165,8 @@ class EventGalleryActivity : AppCompatActivity() {
         
         mediaItems.sortByDescending { it.dateAdded }
 
-        binding.mediaCount.text = "${mediaItems.size} archivos"
         binding.recyclerViewMedia.layoutManager = GridLayoutManager(this, 3)
-        binding.recyclerViewMedia.adapter = MediaAdapter(mediaItems)
+        filterAndDisplay()
     }
     
     data class MediaItem(val uri: String, val name: String, val type: String, val dateAdded: Long)

@@ -88,7 +88,7 @@ class PreviewActivity : AppCompatActivity() {
                 binding.previewVideo.setVideoURI(Uri.parse(uriString))
                 binding.previewVideo.setOnPreparedListener { mp ->
                     mp.isLooping = true
-                    if (slowMotionMode == "boomerang") {
+                    if (slowMotionMode == "boomerang" || slowMotionMode == "boomerang_reverse") {
                         startSpeedOscillation(mp, boomerangMinSpeed, boomerangMaxSpeed, boomerangSlowDuration, boomerangFastDuration)
                     } else if (playbackSpeed != 1.0f) {
                         try {

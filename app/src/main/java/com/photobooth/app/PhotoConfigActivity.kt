@@ -75,14 +75,11 @@ class PhotoConfigActivity : AppCompatActivity() {
                 if (backgroundMode != "none") {
                     binding.backgroundStatus.text = "✓ Fondo: $theme"
                     binding.backgroundStatus.visibility = View.VISIBLE
-                    // Auto-enable background removal when a background is selected
                     removeBackground = true
-                    binding.switchRemoveBackground.isChecked = true
                 } else {
                     binding.backgroundStatus.text = ""
                     binding.backgroundStatus.visibility = View.GONE
                     removeBackground = false
-                    binding.switchRemoveBackground.isChecked = false
                 }
             }
         }
@@ -127,11 +124,6 @@ class PhotoConfigActivity : AppCompatActivity() {
             isPhotoBoothMode = isChecked
         }
         
-        // Remove background
-        binding.switchRemoveBackground.setOnCheckedChangeListener { _, isChecked ->
-            removeBackground = isChecked
-        }
-
         binding.buttonStart.setOnClickListener {
             val intent = Intent(this, CameraActivity::class.java)
             intent.putExtra("EVENT_NAME", eventName)
