@@ -2,9 +2,13 @@ package com.photobooth.app
 
 import android.content.ContentUris
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -13,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import com.bumptech.glide.Glide
 import com.photobooth.app.databinding.ActivityEventGalleryBinding
 import java.io.File
@@ -22,6 +27,19 @@ class EventGalleryActivity : AppCompatActivity() {
     private lateinit var eventName: String
     private val mediaItems = mutableListOf<MediaItem>()
     private var currentFilter = "all"
+    private var pendingDeleteItem: MediaItem? = null
+
+    private val deleteItemLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val item = pendingDeleteItem ?: return@registerForActivityResult
+        pendingDeleteItem = null
+        if (result.resultCode == RESULT_OK) {
+            mediaItems.remove(item)
+            filterAndDisplay()
+            Toast.makeText(this, "Archivo eliminado", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +85,40 @@ class EventGalleryActivity : AppCompatActivity() {
         // Highlight button if there are pending shares
         if (count > 0) {
             binding.buttonPendingShares.setBackgroundColor(getColor(android.R.color.holo_orange_light))
+        }
+    }
+
+    private fun shareMediaItem(item: MediaItem) {
+        val uri = Uri.parse(item.uri)
+        val mimeType = if (item.type == "video") "video/*" else "image/*"
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(shareIntent, "Compartir"))
+    }
+
+    private fun confirmDeleteItem(item: MediaItem) {
+        AlertDialog.Builder(this)
+            .setTitle("Eliminar archivo")
+            .setMessage("¿Eliminar '${item.name}'?")
+            .setPositiveButton("Eliminar") { _, _ -> deleteMediaItem(item) }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun deleteMediaItem(item: MediaItem) {
+        val uri = Uri.parse(item.uri)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pendingDeleteItem = item
+            val pendingIntent = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
+            deleteItemLauncher.launch(IntentSenderRequest.Builder(pendingIntent).build())
+        } else {
+            contentResolver.delete(uri, null, null)
+            mediaItems.remove(item)
+            filterAndDisplay()
+            Toast.makeText(this, "Archivo eliminado", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -194,9 +246,23 @@ class EventGalleryActivity : AppCompatActivity() {
                 .into(holder.imageView)
             
             holder.typeIndicator.text = if (item.type == "video") "🎥" else ""
-            
+
             holder.itemView.setOnClickListener {
                 // TODO: Open full screen preview
+            }
+
+            holder.itemView.setOnLongClickListener {
+                val options = arrayOf("📤 Compartir", "🗑️ Eliminar")
+                AlertDialog.Builder(this@EventGalleryActivity)
+                    .setTitle(item.name)
+                    .setItems(options) { _, which ->
+                        when (which) {
+                            0 -> shareMediaItem(item)
+                            1 -> confirmDeleteItem(item)
+                        }
+                    }
+                    .show()
+                true
             }
         }
         

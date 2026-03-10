@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -13,6 +14,9 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -23,6 +27,21 @@ import com.photobooth.app.databinding.ActivityEventNameBinding
 class EventNameActivity : AppCompatActivity() {
     private lateinit var binding: ActivityEventNameBinding
     private val events = mutableListOf<EventInfo>()
+    private var pendingDeleteEvent: EventInfo? = null
+
+    private val deleteRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val event = pendingDeleteEvent ?: return@registerForActivityResult
+        pendingDeleteEvent = null
+        if (result.resultCode == RESULT_OK) {
+            events.remove(event)
+            binding.recyclerViewEvents.adapter?.notifyDataSetChanged()
+            Toast.makeText(this, "Evento '${event.name}' eliminado", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "No se pudo eliminar el evento", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -191,9 +210,67 @@ class EventNameActivity : AppCompatActivity() {
                 intent.putExtra("EVENT_NAME", event.name)
                 startActivity(intent)
             }
+
+            holder.itemView.setOnLongClickListener {
+                AlertDialog.Builder(this@EventNameActivity)
+                    .setTitle("Eliminar evento")
+                    .setMessage("¿Eliminar '${event.name}' y todos sus archivos? Esta acción no se puede deshacer.")
+                    .setPositiveButton("Eliminar") { _, _ -> deleteEvent(event) }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+                true
+            }
         }
         
         override fun getItemCount() = events.size
+    }
+
+    private fun deleteEvent(event: EventInfo) {
+        val imageArgs = arrayOf("%PhotoBooth/${event.name}%")
+        val imageSelection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+        else
+            "${MediaStore.Images.Media.DATA} LIKE ?"
+        val videoSelection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+        else
+            "${MediaStore.Video.Media.DATA} LIKE ?"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Collect all URIs for MediaStore.createDeleteRequest (needed for files not owned by this app)
+            val uris = mutableListOf<Uri>()
+            contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID), imageSelection, imageArgs, null
+            )?.use { cursor ->
+                val col = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext())
+                    uris.add(ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(col)))
+            }
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media._ID), videoSelection, imageArgs, null
+            )?.use { cursor ->
+                val col = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                while (cursor.moveToNext())
+                    uris.add(ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(col)))
+            }
+            if (uris.isEmpty()) {
+                events.remove(event)
+                binding.recyclerViewEvents.adapter?.notifyDataSetChanged()
+                Toast.makeText(this, "Evento '${event.name}' eliminado", Toast.LENGTH_SHORT).show()
+                return
+            }
+            pendingDeleteEvent = event
+            val pendingIntent = MediaStore.createDeleteRequest(contentResolver, uris)
+            deleteRequestLauncher.launch(IntentSenderRequest.Builder(pendingIntent).build())
+        } else {
+            contentResolver.delete(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, imageSelection, imageArgs)
+            contentResolver.delete(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, videoSelection, imageArgs)
+            events.remove(event)
+            binding.recyclerViewEvents.adapter?.notifyDataSetChanged()
+            Toast.makeText(this, "Evento '${event.name}' eliminado", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun getRequiredPermissions(): Array<String> {

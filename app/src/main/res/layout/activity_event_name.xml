@@ -74,7 +74,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
-                android:textSize="18sp" />
+                android:textSize="18sp"
+                android:textColor="#000000"
+                android:textColorHint="#888888" />
 
         </com.google.android.material.textfield.TextInputLayout>
 
