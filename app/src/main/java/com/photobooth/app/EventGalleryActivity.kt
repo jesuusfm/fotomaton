@@ -65,7 +65,8 @@ class EventGalleryActivity : AppCompatActivity() {
         val photoProjection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.DATA
+            MediaStore.Images.Media.DATA,
+            MediaStore.Images.Media.DATE_ADDED
         )
         
         val photoSelection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -85,15 +86,17 @@ class EventGalleryActivity : AppCompatActivity() {
         )?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
             
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
+                val dateAdded = cursor.getLong(dateColumn)
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     id
                 )
-                mediaItems.add(MediaItem(uri.toString(), name, "photo"))
+                mediaItems.add(MediaItem(uri.toString(), name, "photo", dateAdded))
             }
         }
         
@@ -101,7 +104,8 @@ class EventGalleryActivity : AppCompatActivity() {
         val videoProjection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DATA
+            MediaStore.Video.Media.DATA,
+            MediaStore.Video.Media.DATE_ADDED
         )
         
         val videoSelection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -121,24 +125,28 @@ class EventGalleryActivity : AppCompatActivity() {
         )?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
             
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
+                val dateAdded = cursor.getLong(dateColumn)
                 val uri = ContentUris.withAppendedId(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     id
                 )
-                mediaItems.add(MediaItem(uri.toString(), name, "video"))
+                mediaItems.add(MediaItem(uri.toString(), name, "video", dateAdded))
             }
         }
         
+        mediaItems.sortByDescending { it.dateAdded }
+
         binding.mediaCount.text = "${mediaItems.size} archivos"
         binding.recyclerViewMedia.layoutManager = GridLayoutManager(this, 3)
         binding.recyclerViewMedia.adapter = MediaAdapter(mediaItems)
     }
     
-    data class MediaItem(val uri: String, val name: String, val type: String)
+    data class MediaItem(val uri: String, val name: String, val type: String, val dateAdded: Long)
     
     inner class MediaAdapter(private val items: List<MediaItem>) : 
         RecyclerView.Adapter<MediaAdapter.ViewHolder>() {

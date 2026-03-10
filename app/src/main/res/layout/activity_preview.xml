@@ -28,7 +28,7 @@
         android:id="@+id/button_layout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:padding="16dp"
         android:gravity="center"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -36,23 +36,51 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <Button
-            android:id="@+id/button_another"
-            android:layout_width="0dp"
-            android:layout_height="64dp"
-            android:layout_weight="1"
-            android:text="Otro"
-            android:textSize="20sp"
-            android:layout_marginEnd="8dp"
+            android:id="@+id/button_mute_audio"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="🔇 Silenciar"
+            android:textSize="16sp"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.OutlinedButton" />
 
         <Button
-            android:id="@+id/button_share"
-            android:layout_width="0dp"
-            android:layout_height="64dp"
-            android:layout_weight="1"
-            android:text="Compartir"
-            android:textSize="20sp"
-            android:layout_marginStart="8dp" />
+            android:id="@+id/button_music"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="🎵 Añadir música"
+            android:textSize="16sp"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone"
+            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/button_another"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:text="Otro"
+                android:textSize="20sp"
+                android:layout_marginEnd="8dp"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
+
+            <Button
+                android:id="@+id/button_share"
+                android:layout_width="0dp"
+                android:layout_height="64dp"
+                android:layout_weight="1"
+                android:text="Compartir"
+                android:textSize="20sp"
+                android:layout_marginStart="8dp" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

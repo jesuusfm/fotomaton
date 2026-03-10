@@ -15,9 +15,7 @@ import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
-import android.media.AudioManager
 import android.media.MediaPlayer
-import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -60,6 +58,7 @@ import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.SegmentationMask
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import java.nio.ByteBuffer
+import android.widget.ImageView
 
 class CameraActivity : AppCompatActivity() {
     private lateinit var binding: ActivityCameraBinding
@@ -76,11 +75,14 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var mode: String // PHOTO or VIDEO
     private var filterMode = "normal" // normal or bw
     private var isPhotoBoothMode = false
+    private var photoQuality = "MAX" // MAX, HIGH, STANDARD
     private var videoDuration = 10
-    private var slowMotionMode = "normal" // normal, 0.5x, boomerang
+    private var videoQuality = "FHD" // SD, HD, FHD, UHD
+    private var slowMotionMode = "normal" // normal, 0.5x, boomerang, boomerang_reverse
     private var boomerangMinSpeed = 0.5f
     private var boomerangMaxSpeed = 1.0f
-    private var boomerangFrequency = 0.1f
+    private var boomerangFrequency = 3.0f   // slow segment duration (seconds)
+    private var boomerangFastDuration = 3.0f // fast segment duration (seconds)
     private var frameMode = "none"
     private var framePath = ""
     private var backgroundMode = "none"
@@ -88,9 +90,6 @@ class CameraActivity : AppCompatActivity() {
     private var removeBackground = false
     private var faceFilterType = "none"
     private var faceFilterPath = ""
-    
-    // Sound for video recording end
-    private var toneGenerator: ToneGenerator? = null
 
     // Photo booth
     private val photoBoothBitmaps = mutableListOf<Bitmap>()
@@ -110,8 +109,13 @@ class CameraActivity : AppCompatActivity() {
                 android.util.Log.d("CameraActivity", "Result URI: $uriString")
                 if (uriString != null) {
                     val uri = Uri.parse(uriString)
-                    android.util.Log.d("CameraActivity", "Showing preview for processed video")
-                    showPreview(null, uri)
+                    if (slowMotionMode == "boomerang_reverse") {
+                        android.util.Log.d("CameraActivity", "Background removed - now processing boomerang reverse")
+                        processBoomerangVideo(uri)
+                    } else {
+                        android.util.Log.d("CameraActivity", "Showing preview for processed video")
+                        showPreview(null, uri)
+                    }
                 } else {
                     android.util.Log.e("CameraActivity", "ERROR: No URI in result")
                 }
@@ -120,6 +124,26 @@ class CameraActivity : AppCompatActivity() {
             android.util.Log.e("CameraActivity", "Processing failed or cancelled")
             Toast.makeText(this, "Error en el procesamiento", Toast.LENGTH_SHORT).show()
         }
+    }
+    
+    // Photo preview launcher
+    private val photoPreviewLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.let { data ->
+                val uriString = data.getStringExtra("RESULT_URI")
+                val hasFilter = data.getBooleanExtra("HAS_FILTER", false)
+                if (uriString != null) {
+                    val uri = Uri.parse(uriString)
+                    showPreview(null, uri)
+                    if (hasFilter) {
+                        Toast.makeText(this, "Foto guardada con filtro", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        // If cancelled, temporary file is already deleted by PhotoPreviewActivity
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -132,11 +156,20 @@ class CameraActivity : AppCompatActivity() {
         mode = intent.getStringExtra("MODE") ?: "PHOTO"
         filterMode = intent.getStringExtra("FILTER") ?: "normal"
         isPhotoBoothMode = intent.getBooleanExtra("PHOTO_BOOTH", false)
+        photoQuality = intent.getStringExtra("PHOTO_QUALITY") ?: "MAX"
         videoDuration = intent.getIntExtra("VIDEO_DURATION", 10)
+        videoQuality = intent.getStringExtra("VIDEO_QUALITY") ?: "UHD"
         slowMotionMode = intent.getStringExtra("SLOW_MOTION_MODE") ?: "normal"
+        
+        // Debug logging
+        android.util.Log.d("CameraActivity", "=== CONFIGURACIÓN RECIBIDA ===")
+        android.util.Log.d("CameraActivity", "mode=$mode, videoQuality=$videoQuality, photoQuality=$photoQuality")
+        android.util.Log.d("CameraActivity", "VIDEO_QUALITY extra: ${intent.getStringExtra("VIDEO_QUALITY")}")
+        
         boomerangMinSpeed  = intent.getFloatExtra("BOOMERANG_MIN_SPEED", 0.5f)
         boomerangMaxSpeed = intent.getFloatExtra("BOOMERANG_MAX_SPEED", 1.0f)
-        boomerangFrequency = intent.getFloatExtra("BOOMERANG_FREQUENCY", 0.1f)
+        boomerangFrequency = intent.getFloatExtra("BOOMERANG_SLOW_DURATION", 3.0f)
+        boomerangFastDuration = intent.getFloatExtra("BOOMERANG_FAST_DURATION", 3.0f)
         frameMode = intent.getStringExtra("FRAME") ?: "none"
         framePath = intent.getStringExtra("FRAME_PATH") ?: ""
         backgroundMode = intent.getStringExtra("BACKGROUND") ?: "none"
@@ -144,13 +177,6 @@ class CameraActivity : AppCompatActivity() {
         removeBackground = intent.getBooleanExtra("REMOVE_BG", false)
         faceFilterType = intent.getStringExtra("FACE_FILTER_TYPE") ?: "none"
         faceFilterPath = intent.getStringExtra("FACE_FILTER_PATH") ?: ""
-        
-        // Initialize tone generator for video end sound
-        try {
-            toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
-        } catch (e: Exception) {
-            android.util.Log.w("CameraActivity", "Could not create ToneGenerator: ${e.message}")
-        }
         
         // Update filter indicator
         updateFilterIndicator()
@@ -206,8 +232,24 @@ class CameraActivity : AppCompatActivity() {
                 }
 
             if (mode == "PHOTO") {
+                // Configure image capture based on quality
+                val captureMode = when (photoQuality) {
+                    "MAX" -> ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+                    "HIGH" -> ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+                    else -> ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                }
+                
                 imageCapture = ImageCapture.Builder()
+                    .setCaptureMode(captureMode)
                     .build()
+                
+                val qualityName = when (photoQuality) {
+                    "MAX" -> "Máxima (4K+)"
+                    "HIGH" -> "Alta"
+                    else -> "Estándar"
+                }
+                Toast.makeText(this, "📷 Calidad: $qualityName", Toast.LENGTH_SHORT).show()
+                android.util.Log.d("CameraActivity", "Foto - Calidad: $photoQuality, CaptureMode: $captureMode")
 
                 try {
                     cameraProvider.unbindAll()
@@ -218,10 +260,82 @@ class CameraActivity : AppCompatActivity() {
                     Toast.makeText(this, "Error al iniciar la cámara", Toast.LENGTH_SHORT).show()
                 }
             } else {
+                // Map quality string to CameraX Quality
+                val requestedQuality = when (videoQuality) {
+                    "SD" -> Quality.SD
+                    "HD" -> Quality.HD
+                    "FHD" -> Quality.FHD
+                    "UHD" -> Quality.UHD
+                    else -> Quality.FHD
+                }
+                
+                // Get camera info for selected camera
+                val targetCameraInfo = try {
+                    cameraSelector.filter(cameraProvider.availableCameraInfos).firstOrNull()
+                } catch (e: Exception) {
+                    cameraProvider.availableCameraInfos.firstOrNull()
+                }
+                
+                // Check supported qualities
+                val supportedQualities = if (targetCameraInfo != null) {
+                    QualitySelector.getSupportedQualities(targetCameraInfo)
+                } else {
+                    listOf(Quality.HD) // Default fallback
+                }
+                
+                val qualityNames = supportedQualities.map { q ->
+                    when (q) {
+                        Quality.SD -> "SD(480p)"
+                        Quality.HD -> "HD(720p)"
+                        Quality.FHD -> "FHD(1080p)"
+                        Quality.UHD -> "4K(2160p)"
+                        else -> q.toString()
+                    }
+                }
+                android.util.Log.d("CameraActivity", "Calidades soportadas: ${qualityNames.joinToString(", ")}")
+                
+                // Determine actual quality that will be used
+                val actualQuality = if (supportedQualities.contains(requestedQuality)) {
+                    requestedQuality
+                } else {
+                    // Find fallback - prefer higher quality
+                    supportedQualities.firstOrNull() ?: Quality.HD
+                }
+                
+                val requestedName = when (requestedQuality) {
+                    Quality.SD -> "SD(480p)"
+                    Quality.HD -> "HD(720p)"
+                    Quality.FHD -> "FHD(1080p)"
+                    Quality.UHD -> "4K(2160p)"
+                    else -> requestedQuality.toString()
+                }
+                val actualName = when (actualQuality) {
+                    Quality.SD -> "SD(480p)"
+                    Quality.HD -> "HD(720p)"
+                    Quality.FHD -> "FHD(1080p)"
+                    Quality.UHD -> "4K(2160p)"
+                    else -> actualQuality.toString()
+                }
+                
+                android.util.Log.d("CameraActivity", "Calidad solicitada: $requestedName, Calidad real: $actualName")
+                
+                // Show toast with actual quality
+                if (requestedQuality != actualQuality) {
+                    Toast.makeText(this, "⚠️ $requestedName no soportado. Usando $actualName", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "📹 Grabando en $actualName", Toast.LENGTH_SHORT).show()
+                }
+                
+                // Use actualQuality (the one that's actually supported)
+                val qualitySelector = QualitySelector.from(actualQuality, FallbackStrategy.higherQualityOrLowerThan(Quality.SD))
+                android.util.Log.d("CameraActivity", "QualitySelector creado con: $actualName")
+                
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.HD, FallbackStrategy.higherQualityOrLowerThan(Quality.SD)))
+                    .setQualitySelector(qualitySelector)
                     .build()
                 videoCapture = VideoCapture.withOutput(recorder)
+                
+                android.util.Log.d("CameraActivity", "VideoCapture configurado. videoQuality param=$videoQuality")
 
                 try {
                     cameraProvider.unbindAll()
@@ -255,7 +369,7 @@ class CameraActivity : AppCompatActivity() {
                 countdown--
                 if (countdown > 0) {
                     binding.countdownText.text = countdown.toString()
-                    toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 150) // Beep for 3, 2, 1
+                    ToneGenerator.playBeep(1200) // 1200Hz beep for 3, 2, and 1
                 }
             }
 
@@ -265,7 +379,7 @@ class CameraActivity : AppCompatActivity() {
                 if (mode == "PHOTO") {
                     // Small delay before capture sound for photos only
                     Handler(Looper.getMainLooper()).postDelayed({
-                        toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 200) // Capture sound
+                        ToneGenerator.playBeep(300) // 300Hz beep for capture
                     }, 100)
                 }
                 
@@ -297,7 +411,7 @@ class CameraActivity : AppCompatActivity() {
                     var bitmap = imageProxyToBitmap(image)
                     image.close()
                     
-                    // Apply effects in order: filter -> background -> frame
+                    // Apply effects in order: filter -> background -> frame -> face filter
                     if (filterMode != "normal") {
                         bitmap = applyFilter(bitmap, filterMode)
                     }
@@ -309,21 +423,45 @@ class CameraActivity : AppCompatActivity() {
                             if (frameMode != "none" && framePath.isNotEmpty()) {
                                 finalBitmap = applyFrame(finalBitmap, framePath)
                             }
-                            sessionPhotos.add(finalBitmap)
-                            savePhotoToGallery(finalBitmap)
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                showPreview(finalBitmap, null)
-                            }, 200)
+                            
+                            // Apply face filter if selected
+                            if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                                applyFaceFilterToPhoto(finalBitmap) { filteredBitmap ->
+                                    sessionPhotos.add(filteredBitmap)
+                                    savePhotoToGallery(filteredBitmap)
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        showPreview(filteredBitmap, null)
+                                    }, 200)
+                                }
+                            } else {
+                                sessionPhotos.add(finalBitmap)
+                                savePhotoToGallery(finalBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    showPreview(finalBitmap, null)
+                                }, 200)
+                            }
                         }
                     } else {
                         if (frameMode != "none" && framePath.isNotEmpty()) {
                             bitmap = applyFrame(bitmap, framePath)
                         }
-                        sessionPhotos.add(bitmap)
-                        savePhotoToGallery(bitmap)
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            showPreview(bitmap, null)
-                        }, 200)
+                        
+                        // Apply face filter if selected
+                        if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                            applyFaceFilterToPhoto(bitmap) { filteredBitmap ->
+                                sessionPhotos.add(filteredBitmap)
+                                savePhotoToGallery(filteredBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    showPreview(filteredBitmap, null)
+                                }, 200)
+                            }
+                        } else {
+                            sessionPhotos.add(bitmap)
+                            savePhotoToGallery(bitmap)
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                showPreview(bitmap, null)
+                            }, 200)
+                        }
                     }
                 }
 
@@ -332,6 +470,81 @@ class CameraActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+    
+    private fun applyFaceFilterToPhoto(bitmap: Bitmap, callback: (Bitmap) -> Unit) {
+        Thread {
+            try {
+                // Detect faces
+                val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+                val options = com.google.mlkit.vision.face.FaceDetectorOptions.Builder()
+                    .setPerformanceMode(com.google.mlkit.vision.face.FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+                    .setLandmarkMode(com.google.mlkit.vision.face.FaceDetectorOptions.LANDMARK_MODE_ALL)
+                    .build()
+                val detector = com.google.mlkit.vision.face.FaceDetection.getClient(options)
+                
+                detector.process(image)
+                    .addOnSuccessListener { faces ->
+                        if (faces.isEmpty()) {
+                            runOnUiThread {
+                                Toast.makeText(this, "No se detectaron caras, guardando sin filtro", Toast.LENGTH_SHORT).show()
+                                callback(bitmap)
+                            }
+                            detector.close()
+                            return@addOnSuccessListener
+                        }
+                        
+                        // Load filter image with transparency support
+                        val filterBitmap = try {
+                            assets.open(faceFilterPath).use { inputStream ->
+                                val options = BitmapFactory.Options().apply {
+                                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                                }
+                                BitmapFactory.decodeStream(inputStream, null, options)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        
+                        if (filterBitmap == null) {
+                            runOnUiThread {
+                                Toast.makeText(this, "Error cargando filtro, guardando sin filtro", Toast.LENGTH_SHORT).show()
+                                callback(bitmap)
+                            }
+                            detector.close()
+                            return@addOnSuccessListener
+                        }
+                        
+                        // Apply filter
+                        val filteredBitmap = FaceFilterHelper.applyFaceFilter(
+                            bitmap,
+                            faces,
+                            filterBitmap,
+                            faceFilterType
+                        )
+                        
+                        filterBitmap.recycle()
+                        detector.close()
+                        
+                        runOnUiThread {
+                            Toast.makeText(this, "Filtro aplicado a ${faces.size} cara(s)", Toast.LENGTH_SHORT).show()
+                            callback(filteredBitmap)
+                        }
+                    }
+                    .addOnFailureListener { e ->
+                        runOnUiThread {
+                            Toast.makeText(this, "Error detectando caras: ${e.message}", Toast.LENGTH_SHORT).show()
+                            callback(bitmap)
+                        }
+                        detector.close()
+                    }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Error aplicando filtro: ${e.message}", Toast.LENGTH_SHORT).show()
+                    callback(bitmap)
+                }
+            }
+        }.start()
     }
 
     private fun takePhotoBoothPhoto() {
@@ -440,12 +653,26 @@ class CameraActivity : AppCompatActivity() {
                         binding.buttonCapture.text = if (mode == "PHOTO") "📷" else "🎥"
                         recordingTimer?.cancel()
                         recordingTimer = null
-                        
-                        // Play sound to indicate recording ended
-                        playVideoEndSound()
-                        
                         if (!recordEvent.hasError()) {
                             val uri = recordEvent.outputResults.outputUri
+                            
+                            // Get actual video resolution
+                            try {
+                                val retriever = android.media.MediaMetadataRetriever()
+                                retriever.setDataSource(this@CameraActivity, uri)
+                                val width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                                val height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                                val bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                                retriever.release()
+                                
+                                android.util.Log.d("CameraActivity", "=== VIDEO GRABADO ===")
+                                android.util.Log.d("CameraActivity", "Resolución real: ${width}x${height}")
+                                android.util.Log.d("CameraActivity", "Bitrate: $bitrate bps")
+                                
+                                Toast.makeText(this@CameraActivity, "📹 Video: ${width}x${height}", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {
+                                android.util.Log.e("CameraActivity", "Error getting video metadata: ${e.message}")
+                            }
                             
                             android.util.Log.d("CameraActivity", "Video recording finalized. URI: $uri")
                             android.util.Log.d("CameraActivity", "slowMotionMode = $slowMotionMode")
@@ -453,19 +680,18 @@ class CameraActivity : AppCompatActivity() {
                             android.util.Log.d("CameraActivity", "backgroundPath = $backgroundPath")
                             android.util.Log.d("CameraActivity", "filterMode = $filterMode")
                             android.util.Log.d("CameraActivity", "frameMode = $frameMode")
-                            android.util.Log.d("CameraActivity", "faceFilterType = $faceFilterType")
                             
-                            // Check if heavy processing is needed - launch ProcessingActivity
-                            val needsProcessingActivity = (removeBackground && backgroundPath.isNotEmpty()) ||
-                                    (faceFilterType != "none" && faceFilterPath.isNotEmpty())
-                            
-                            if (needsProcessingActivity) {
-                                android.util.Log.d("CameraActivity", "Heavy processing needed - launching ProcessingActivity")
+                            // Check if background removal is needed - launch ProcessingActivity
+                            if (removeBackground && backgroundPath.isNotEmpty()) {
+                                android.util.Log.d("CameraActivity", "Background removal needed - launching ProcessingActivity")
                                 launchProcessingActivity(uri)
+                            } else if (slowMotionMode == "boomerang_reverse") {
+                                android.util.Log.d("CameraActivity", "Boomerang reverse mode - processing video")
+                                processBoomerangVideo(uri)
                             } else if (slowMotionMode != "normal") {
-                                android.util.Log.d("CameraActivity", "Processing slow motion")
-                                Toast.makeText(this, "Video guardado. Procesando...", Toast.LENGTH_SHORT).show()
-                                processSlowMotionVideo(uri)
+                                android.util.Log.d("CameraActivity", "Slow motion mode - passing to preview with speed params")
+                                Toast.makeText(this, "Video guardado", Toast.LENGTH_SHORT).show()
+                                showPreview(null, uri)
                             } else if (filterMode != "normal" || (frameMode != "none" && framePath.isNotEmpty())) {
                                 android.util.Log.d("CameraActivity", "Processing filter/frame")
                                 Toast.makeText(this, "Video guardado. Procesando...", Toast.LENGTH_SHORT).show()
@@ -489,28 +715,6 @@ class CameraActivity : AppCompatActivity() {
     private fun stopVideoRecording() {
         recording?.stop()
         recordingTimer?.cancel()
-    }
-    
-    /**
-     * Play sound when video recording ends
-     */
-    private fun playVideoEndSound() {
-        try {
-            // Try to play custom sound if available
-            val soundResId = resources.getIdentifier("video_end", "raw", packageName)
-            if (soundResId != 0) {
-                val mediaPlayer = MediaPlayer.create(this, soundResId)
-                mediaPlayer?.apply {
-                    setOnCompletionListener { release() }
-                    start()
-                }
-            } else {
-                // Use system beep sound
-                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("CameraActivity", "Could not play sound: ${e.message}")
-        }
     }
 
     private fun imageProxyToBitmap(image: androidx.camera.core.ImageProxy): Bitmap {
@@ -683,6 +887,14 @@ class CameraActivity : AppCompatActivity() {
             intent.putExtra("VIDEO_URI", videoUri.toString())
             intent.putExtra("TYPE", "VIDEO")
             intent.putExtra("SLOW_MOTION_MODE", slowMotionMode)
+            if (slowMotionMode == "0.5x") {
+                intent.putExtra("PLAYBACK_SPEED", 0.5f)
+            } else if (slowMotionMode == "boomerang") {
+                intent.putExtra("BOOMERANG_MIN_SPEED", boomerangMinSpeed)
+                intent.putExtra("BOOMERANG_MAX_SPEED", boomerangMaxSpeed)
+                intent.putExtra("BOOMERANG_SLOW_DURATION", boomerangFrequency)
+                intent.putExtra("BOOMERANG_FAST_DURATION", boomerangFastDuration)
+            }
         }
         
         intent.putExtra("EVENT_NAME", eventName)
@@ -698,70 +910,57 @@ class CameraActivity : AppCompatActivity() {
                     Toast.makeText(this, "Procesando video en cámara lenta...", Toast.LENGTH_SHORT).show()
                 }
                 
-                android.util.Log.d("SlowMotion", "Getting real path from URI: $inputUri")
+                // Copy input video to cache (works with Scoped Storage)
+                val inputFile = File(cacheDir, "input_slow_${System.currentTimeMillis()}.mp4")
+                contentResolver.openInputStream(inputUri)?.use { input ->
+                    inputFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
                 
-                // Get real path from URI
-                val inputPath = getRealPathFromURI(inputUri)
-                android.util.Log.d("SlowMotion", "Real path: $inputPath")
+                val inputPath = inputFile.absolutePath
+                android.util.Log.d("SlowMotion", "Copied to: $inputPath, size: ${inputFile.length()}")
                 
-                if (inputPath == null) {
+                if (!inputFile.exists() || inputFile.length() == 0L) {
                     runOnUiThread {
-                        Toast.makeText(this, "Error: No se pudo acceder al video", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Error: No se pudo copiar el video", Toast.LENGTH_SHORT).show()
                         showPreview(null, inputUri)
                     }
                     return@Thread
                 }
                 
-                // Create output file in cache
                 val outputFile = File(cacheDir, "slow_motion_${System.currentTimeMillis()}.mp4")
                 val outputPath = outputFile.absolutePath
                 
-                // Build FFmpeg command based on slow motion mode
+                // Use -itsscale to change speed WITHOUT re-encoding (avoids codec issues)
+                // -itsscale multiplies input timestamps: 2.0 = video plays 2x slower (0.5x speed)
+                // -c copy = no re-encoding needed, just changes timestamps
+                // -an = drop audio (can't slow audio without re-encoding)
                 val command = when (slowMotionMode) {
                     "0.5x" -> {
-                        // Simple slow motion at 0.5x speed
-                        // setpts=2.0*PTS makes video 2x slower (0.5x speed)
-                        // atempo=0.5 slows down audio to match
-                        "-i \"$inputPath\" -filter:v \"setpts=2.0*PTS\" -filter:a \"atempo=0.5\" -b:v 5M -r 30 \"$outputPath\""
+                        // 0.5x speed = 2x slower
+                        "-y -itsscale 2.0 -i \"$inputPath\" -c copy -an \"$outputPath\""
                     }
                     "boomerang" -> {
-                        // Boomerang effect: oscillating speed with custom parameters
-                        // Calculate average speed to determine output duration
-                        val avgSpeed = (boomerangMinSpeed + boomerangMaxSpeed) / 2.0f
-                        val speedRange = (boomerangMaxSpeed - boomerangMinSpeed) / 2.0f
-                        
-                        // For setpts: higher values = slower video
-                        // We need to invert the speed logic for setpts
-                        // If speed ranges from 0.5x to 1.0x, setpts divisor ranges from 2.0 to 1.0
-                        val divisorMin = 1.0f / boomerangMaxSpeed  // At max speed, lowest divisor
-                        val divisorMax = 1.0f / boomerangMinSpeed  // At min speed, highest divisor
-                        val divisorAvg = (divisorMin + divisorMax) / 2.0f
-                        val divisorRange = (divisorMax - divisorMin) / 2.0f
-                        
-                        // Apply average tempo to audio (must be between 0.5 and 2.0)
-                        val audioTempo = avgSpeed.coerceIn(0.5f, 2.0f)
-                        
-                        "-i \"$inputPath\" -filter:v \"setpts='PTS*($divisorAvg+$divisorRange*sin(N*$boomerangFrequency))'\" -filter:a \"atempo=$audioTempo\" -b:v 5M -r 30 \"$outputPath\""
+                        // For boomerang we need frame-level manipulation
+                        // Use a moderate slow-down as approximation
+                        val avgFactor = 1.0f / ((boomerangMinSpeed + boomerangMaxSpeed) / 2.0f)
+                        "-y -itsscale $avgFactor -i \"$inputPath\" -c copy -an \"$outputPath\""
                     }
                     else -> {
-                        // Default to 0.5x if mode is unknown
-                        "-i \"$inputPath\" -filter:v \"setpts=2.0*PTS\" -filter:a \"atempo=0.5\" -b:v 5M -r 30 \"$outputPath\""
+                        "-y -itsscale 2.0 -i \"$inputPath\" -c copy -an \"$outputPath\""
                     }
                 }
                 
                 android.util.Log.d("SlowMotion", "Mode: $slowMotionMode")
-                android.util.Log.d("SlowMotion", "Input path: $inputPath")
-                android.util.Log.d("SlowMotion", "Output path: $outputPath")
                 android.util.Log.d("SlowMotion", "Command: $command")
                 
-                // Execute FFmpeg command
                 val session = FFmpegKit.execute(command)
                 
                 android.util.Log.d("SlowMotion", "Return code: ${session.returnCode}")
                 android.util.Log.d("SlowMotion", "Output: ${session.output}")
-                android.util.Log.d("SlowMotion", "Failed executions: ${session.failStackTrace}")
                 
-                if (ReturnCode.isSuccess(session.returnCode)) {
+                if (ReturnCode.isSuccess(session.returnCode) && outputFile.exists() && outputFile.length() > 0) {
                     // Success - save to gallery
                     val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + "_slow"
                     val contentValues = ContentValues().apply {
@@ -780,8 +979,9 @@ class CameraActivity : AppCompatActivity() {
                             }
                         }
                         
-                        // Clean up temp file
+                        // Clean up temp files
                         outputFile.delete()
+                        inputFile.delete()
                         
                         runOnUiThread {
                             Toast.makeText(this, "Video en cámara lenta listo", Toast.LENGTH_SHORT).show()
@@ -789,15 +989,18 @@ class CameraActivity : AppCompatActivity() {
                         }
                     } ?: run {
                         outputFile.delete()
+                        inputFile.delete()
                         runOnUiThread {
                             Toast.makeText(this, "Error al guardar video", Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
-                    // Error
+                    // Error - show original video
+                    android.util.Log.e("SlowMotion", "FFmpeg failed or output file empty")
                     outputFile.delete()
+                    inputFile.delete()
                     runOnUiThread {
-                        Toast.makeText(this, "Error procesando video", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Error procesando video, mostrando original", Toast.LENGTH_SHORT).show()
                         showPreview(null, inputUri)
                     }
                 }
@@ -810,7 +1013,450 @@ class CameraActivity : AppCompatActivity() {
             }
         }.start()
     }
-    
+
+    private fun processBoomerangVideo(inputUri: Uri) {
+        android.util.Log.d("Boomerang", "processBoomerangVideo START - MediaExtractor+MediaCodec")
+        Thread {
+            var decoder: android.media.MediaCodec? = null
+            var encoder: android.media.MediaCodec? = null
+            var muxer: android.media.MediaMuxer? = null
+            var extractor: android.media.MediaExtractor? = null
+
+            try {
+                runOnUiThread {
+                    binding.progressOverlay.visibility = View.VISIBLE
+                    binding.progressLabel.text = "Decodificando video..."
+                    binding.progressBar.progress = 0
+                    binding.progressPercent.text = "0%"
+                }
+
+                // Copy URI to a temp file for MediaExtractor
+                val inputFile = File(cacheDir, "input_boom_${System.currentTimeMillis()}.mp4")
+                contentResolver.openInputStream(inputUri)?.use { inp ->
+                    inputFile.outputStream().use { out -> inp.copyTo(out) }
+                }
+                val inputPath = inputFile.absolutePath
+
+                // Step 1: Find video track
+                extractor = android.media.MediaExtractor()
+                extractor.setDataSource(inputPath)
+
+                var videoTrackIndex = -1
+                var inputFormat: android.media.MediaFormat? = null
+                for (i in 0 until extractor.trackCount) {
+                    val fmt = extractor.getTrackFormat(i)
+                    val mime = fmt.getString(android.media.MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("video/")) {
+                        videoTrackIndex = i
+                        inputFormat = fmt
+                        break
+                    }
+                }
+
+                if (videoTrackIndex < 0 || inputFormat == null) {
+                    inputFile.delete()
+                    runOnUiThread {
+                        binding.progressOverlay.visibility = View.GONE
+                        Toast.makeText(this, "Error: no se encontró pista de video", Toast.LENGTH_SHORT).show()
+                        showPreview(null, inputUri)
+                    }
+                    return@Thread
+                }
+
+                extractor.selectTrack(videoTrackIndex)
+
+                val srcWidth = inputFormat.getInteger(android.media.MediaFormat.KEY_WIDTH)
+                val srcHeight = inputFormat.getInteger(android.media.MediaFormat.KEY_HEIGHT)
+                val rotation = try { inputFormat.getInteger("rotation-degrees") } catch (_: Exception) {
+                    try {
+                        val ret = android.media.MediaMetadataRetriever()
+                        ret.setDataSource(inputPath)
+                        val r = ret.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+                        ret.release()
+                        r
+                    } catch (_: Exception) { 0 }
+                }
+                val origBitrate = try { inputFormat.getInteger(android.media.MediaFormat.KEY_BIT_RATE) } catch (_: Exception) { 10_000_000 }
+                val inputMime = inputFormat.getString(android.media.MediaFormat.KEY_MIME)!!
+
+                android.util.Log.d("Boomerang", "Source: ${srcWidth}x${srcHeight}, rotation=$rotation, mime=$inputMime")
+
+                // Target 480p for speed (scale down preserving aspect ratio)
+                val maxDim = 480
+                val scale: Float
+                val isRotated = rotation == 90 || rotation == 270
+                // srcWidth/srcHeight are raw stream dimensions (before rotation)
+                val displayW = if (isRotated) srcHeight else srcWidth
+                val displayH = if (isRotated) srcWidth else srcHeight
+
+                scale = if (displayW > displayH) {
+                    (maxDim.toFloat() / displayH).coerceAtMost(1f)
+                } else {
+                    (maxDim.toFloat() / displayW).coerceAtMost(1f)
+                }
+
+                val encWidth = ((displayW * scale).toInt() / 2) * 2
+                val encHeight = ((displayH * scale).toInt() / 2) * 2
+                val frameYuvSize = encWidth * encHeight * 3 / 2
+
+                android.util.Log.d("Boomerang", "Encoder: ${encWidth}x${encHeight}, scale=$scale")
+
+                // Step 2: Decode all frames using MediaCodec decoder (sequential, fast)
+                decoder = android.media.MediaCodec.createDecoderByType(inputMime)
+                // Configure for ByteBuffer output (no Surface)
+                val decoderFormat = android.media.MediaFormat.createVideoFormat(inputMime, srcWidth, srcHeight)
+                // Copy CSD buffers if present
+                for (csdKey in listOf("csd-0", "csd-1", "csd-2")) {
+                    if (inputFormat.containsKey(csdKey)) {
+                        decoderFormat.setByteBuffer(csdKey, inputFormat.getByteBuffer(csdKey))
+                    }
+                }
+                decoder.configure(inputFormat, null, null, 0)
+                decoder.start()
+
+                val decoderInfo = android.media.MediaCodec.BufferInfo()
+                var extractorDone = false
+                var decoderDone = false
+                val yuvFrames = mutableListOf<ByteArray>()
+
+                while (!decoderDone) {
+                    // Feed extractor data to decoder
+                    if (!extractorDone) {
+                        val inIdx = decoder.dequeueInputBuffer(10_000)
+                        if (inIdx >= 0) {
+                            val inBuf = decoder.getInputBuffer(inIdx)!!
+                            val sampleSize = extractor.readSampleData(inBuf, 0)
+                            if (sampleSize < 0) {
+                                decoder.queueInputBuffer(inIdx, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                extractorDone = true
+                            } else {
+                                decoder.queueInputBuffer(inIdx, 0, sampleSize, extractor.sampleTime, 0)
+                                extractor.advance()
+                            }
+                        }
+                    }
+
+                    // Get decoded frames
+                    val outIdx = decoder.dequeueOutputBuffer(decoderInfo, 10_000)
+                    if (outIdx >= 0) {
+                        if (decoderInfo.size > 0) {
+                            // Use getOutputImage() for correct color planes (handles NV12/NV21/YV12 transparently)
+                            val image = decoder.getOutputImage(outIdx)
+                            if (image != null) {
+                                var bmp = imageToBitmap(image, isRotated)
+                                image.close()
+                                if (bmp != null) {
+                                    val scaled = if (bmp.width != encWidth || bmp.height != encHeight) {
+                                        Bitmap.createScaledBitmap(bmp, encWidth, encHeight, true)
+                                    } else bmp
+
+                                    val yuv = bitmapToNV12(scaled, encWidth, encHeight)
+                                    yuvFrames.add(yuv)
+
+                                    if (scaled !== bmp) scaled.recycle()
+                                    bmp.recycle()
+                                }
+                            }
+                        }
+                        decoder.releaseOutputBuffer(outIdx, false)
+
+                        if (decoderInfo.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            decoderDone = true
+                        }
+
+                        if (yuvFrames.size % 10 == 0) {
+                            runOnUiThread {
+                                binding.progressLabel.text = "Decodificando..."
+                                binding.progressBar.progress = (yuvFrames.size % 200) / 2
+                                binding.progressPercent.text = "${yuvFrames.size} frames"
+                            }
+                        }
+                    }
+                }
+
+                decoder.stop()
+                decoder.release()
+                decoder = null
+                extractor.release()
+                extractor = null
+                inputFile.delete()
+
+                android.util.Log.d("Boomerang", "Decoded ${yuvFrames.size} frames to NV12 at ${encWidth}x${encHeight}")
+
+                if (yuvFrames.isEmpty()) {
+                    runOnUiThread {
+                        binding.progressOverlay.visibility = View.GONE
+                        Toast.makeText(this, "Error: no se decodificaron frames", Toast.LENGTH_SHORT).show()
+                        showPreview(null, inputUri)
+                    }
+                    return@Thread
+                }
+
+                runOnUiThread {
+                    binding.progressLabel.text = "Codificando boomerang..."
+                    binding.progressBar.progress = 0
+                    binding.progressPercent.text = "0%"
+                }
+
+                // Step 3: Build forward + reverse sequence
+                val allFrames = yuvFrames + yuvFrames.asReversed()
+                val fps = 30
+
+                // Step 4: Encode with MediaCodec H.264
+                val outputFile = File(cacheDir, "boomerang_${System.currentTimeMillis()}.mp4")
+                val encMime = android.media.MediaFormat.MIMETYPE_VIDEO_AVC
+                val encFormat = android.media.MediaFormat.createVideoFormat(encMime, encWidth, encHeight)
+                encFormat.setInteger(android.media.MediaFormat.KEY_COLOR_FORMAT,
+                    android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
+                encFormat.setInteger(android.media.MediaFormat.KEY_BIT_RATE, origBitrate.coerceIn(3_000_000, 15_000_000))
+                encFormat.setInteger(android.media.MediaFormat.KEY_FRAME_RATE, fps)
+                encFormat.setInteger(android.media.MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+
+                encoder = android.media.MediaCodec.createEncoderByType(encMime)
+                encoder.configure(encFormat, null, null, android.media.MediaCodec.CONFIGURE_FLAG_ENCODE)
+                encoder.start()
+
+                muxer = android.media.MediaMuxer(outputFile.absolutePath, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+                var trackIndex = -1
+                var muxerStarted = false
+                val bufferInfo = android.media.MediaCodec.BufferInfo()
+                val frameDurationUs = 1_000_000L / fps
+
+                for ((idx, yuvData) in allFrames.withIndex()) {
+                    // Feed encoder
+                    val inIdx = encoder.dequeueInputBuffer(10_000_000L)
+                    if (inIdx >= 0) {
+                        val inBuf = encoder.getInputBuffer(inIdx)!!
+                        inBuf.clear()
+                        inBuf.put(yuvData)
+                        encoder.queueInputBuffer(inIdx, 0, yuvData.size, idx.toLong() * frameDurationUs, 0)
+                    }
+
+                    // Drain encoder
+                    while (true) {
+                        val outIdx = encoder.dequeueOutputBuffer(bufferInfo, 0)
+                        when {
+                            outIdx == android.media.MediaCodec.INFO_TRY_AGAIN_LATER -> break
+                            outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                                trackIndex = muxer.addTrack(encoder.outputFormat)
+                                muxer.start()
+                                muxerStarted = true
+                            }
+                            outIdx >= 0 -> {
+                                val outBuf = encoder.getOutputBuffer(outIdx)!!
+                                if (bufferInfo.flags and android.media.MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                                    bufferInfo.size = 0
+                                }
+                                if (bufferInfo.size > 0 && muxerStarted) {
+                                    outBuf.position(bufferInfo.offset)
+                                    outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                                    muxer.writeSampleData(trackIndex, outBuf, bufferInfo)
+                                }
+                                encoder.releaseOutputBuffer(outIdx, false)
+                            }
+                        }
+                    }
+
+                    if (idx % 10 == 0) {
+                        val pct = ((idx.toFloat() / allFrames.size) * 100).toInt()
+                        runOnUiThread {
+                            binding.progressBar.progress = pct
+                            binding.progressPercent.text = "$pct%"
+                        }
+                    }
+                }
+
+                // Signal EOS
+                val eosIdx = encoder.dequeueInputBuffer(10_000_000L)
+                if (eosIdx >= 0) {
+                    encoder.queueInputBuffer(eosIdx, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                }
+                var drainRetries = 0
+                while (drainRetries < 100) {
+                    val outIdx = encoder.dequeueOutputBuffer(bufferInfo, 10_000)
+                    when {
+                        outIdx == android.media.MediaCodec.INFO_TRY_AGAIN_LATER -> drainRetries++
+                        outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            if (!muxerStarted) {
+                                trackIndex = muxer.addTrack(encoder.outputFormat)
+                                muxer.start()
+                                muxerStarted = true
+                            }
+                        }
+                        outIdx >= 0 -> {
+                            drainRetries = 0
+                            val outBuf = encoder.getOutputBuffer(outIdx)!!
+                            if (bufferInfo.size > 0 && muxerStarted) {
+                                outBuf.position(bufferInfo.offset)
+                                outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                                muxer.writeSampleData(trackIndex, outBuf, bufferInfo)
+                            }
+                            encoder.releaseOutputBuffer(outIdx, false)
+                            if (bufferInfo.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                        }
+                    }
+                }
+
+                encoder.stop(); encoder.release(); encoder = null
+                if (muxerStarted) muxer.stop()
+                muxer.release(); muxer = null
+
+                android.util.Log.d("Boomerang", "Output: ${outputFile.absolutePath}, size: ${outputFile.length()}")
+
+                if (outputFile.exists() && outputFile.length() > 0) {
+                    val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + "_boom"
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/PhotoBooth/$eventName")
+                        }
+                    }
+                    val outputUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    outputUri?.let { uri ->
+                        contentResolver.openOutputStream(uri)?.use { out ->
+                            outputFile.inputStream().use { inp -> inp.copyTo(out) }
+                        }
+                        outputFile.delete()
+                        runOnUiThread {
+                            binding.progressOverlay.visibility = View.GONE
+                            showPreview(null, uri)
+                        }
+                    } ?: run {
+                        outputFile.delete()
+                        runOnUiThread {
+                            binding.progressOverlay.visibility = View.GONE
+                            Toast.makeText(this, "Error al guardar boomerang", Toast.LENGTH_SHORT).show()
+                            showPreview(null, inputUri)
+                        }
+                    }
+                } else {
+                    runOnUiThread {
+                        binding.progressOverlay.visibility = View.GONE
+                        Toast.makeText(this, "Error creando boomerang", Toast.LENGTH_SHORT).show()
+                        showPreview(null, inputUri)
+                    }
+                }
+
+            } catch (e: Exception) {
+                android.util.Log.e("Boomerang", "Error: ${e.message}", e)
+                try { decoder?.stop() } catch (_: Exception) {}
+                try { decoder?.release() } catch (_: Exception) {}
+                try { encoder?.stop() } catch (_: Exception) {}
+                try { encoder?.release() } catch (_: Exception) {}
+                try { muxer?.stop() } catch (_: Exception) {}
+                try { muxer?.release() } catch (_: Exception) {}
+                try { extractor?.release() } catch (_: Exception) {}
+
+                runOnUiThread {
+                    binding.progressOverlay.visibility = View.GONE
+                    Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showPreview(null, inputUri)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Convert decoder YUV output to Bitmap, handling rotation
+     */
+    /**
+     * Convert a MediaCodec output Image to a Bitmap using proper plane access.
+     * This correctly handles NV12, NV21, YV12, I420 and all flexible formats.
+     */
+    private fun imageToBitmap(image: android.media.Image, applyRotation: Boolean): Bitmap? {
+        return try {
+            val width = image.width
+            val height = image.height
+            val planes = image.planes
+
+            val yPlane = planes[0]
+            val uPlane = planes[1]
+            val vPlane = planes[2]
+
+            val yBuf = yPlane.buffer
+            val uBuf = uPlane.buffer
+            val vBuf = vPlane.buffer
+
+            val yRowStride = yPlane.rowStride
+            val uvRowStride = uPlane.rowStride
+            val uvPixelStride = uPlane.pixelStride
+
+            // Build NV21 (Y + interleaved VU) for YuvImage
+            val nv21 = ByteArray(width * height * 3 / 2)
+
+            // Copy Y plane row by row (skip padding)
+            for (row in 0 until height) {
+                yBuf.position(row * yRowStride)
+                val copyLen = width.coerceAtMost(yBuf.remaining())
+                yBuf.get(nv21, row * width, copyLen)
+            }
+
+            // Interleave V, U into NV21 UV plane
+            val uvOffset = width * height
+            for (row in 0 until height / 2) {
+                for (col in 0 until width / 2) {
+                    val uvIdx = row * uvRowStride + col * uvPixelStride
+                    val nv21Idx = uvOffset + row * width + col * 2
+                    if (uvIdx < vBuf.capacity() && uvIdx < uBuf.capacity() && nv21Idx + 1 < nv21.size) {
+                        nv21[nv21Idx]     = vBuf.get(uvIdx)
+                        nv21[nv21Idx + 1] = uBuf.get(uvIdx)
+                    }
+                }
+            }
+
+            val yuvImage = android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, width, height, null)
+            val baos = java.io.ByteArrayOutputStream()
+            yuvImage.compressToJpeg(android.graphics.Rect(0, 0, width, height), 90, baos)
+            val jpegBytes = baos.toByteArray()
+            var bmp = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size) ?: return null
+
+            if (applyRotation) {
+                val matrix = android.graphics.Matrix()
+                matrix.postRotate(90f)
+                val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                bmp.recycle()
+                bmp = rotated
+            }
+
+            bmp
+        } catch (e: Exception) {
+            android.util.Log.e("Boomerang", "imageToBitmap error: ${e.message}")
+            null
+        }
+    }
+
+    private fun bitmapToNV12(bitmap: Bitmap, width: Int, height: Int): ByteArray {
+        val argb = IntArray(width * height)
+        bitmap.getPixels(argb, 0, width, 0, 0, width, height)
+
+        val yuv = ByteArray(width * height * 3 / 2)
+        var yIndex = 0
+        var uvIndex = width * height
+
+        for (j in 0 until height) {
+            for (i in 0 until width) {
+                val pixel = argb[j * width + i]
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+
+                val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
+                yuv[yIndex++] = y.coerceIn(16, 235).toByte()
+
+                if (j % 2 == 0 && i % 2 == 0) {
+                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
+                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
+                    yuv[uvIndex++] = u.coerceIn(16, 240).toByte()
+                    yuv[uvIndex++] = v.coerceIn(16, 240).toByte()
+                }
+            }
+        }
+
+        return yuv
+    }
+
     private fun getRealPathFromURI(uri: Uri): String? {
         return try {
             val projection = arrayOf(MediaStore.Video.Media.DATA)
@@ -832,11 +1478,26 @@ class CameraActivity : AppCompatActivity() {
         android.util.Log.d("CameraActivity", "=== Launching ProcessingActivity ===")
         android.util.Log.d("CameraActivity", "Input URI: $inputUri")
         
-        val inputPath = getRealPathFromURI(inputUri)
-        android.util.Log.d("CameraActivity", "Real path: $inputPath")
+        // Copy video to cache to work around Scoped Storage restrictions
+        val inputFile = File(cacheDir, "input_processing_${System.currentTimeMillis()}.mp4")
+        try {
+            contentResolver.openInputStream(inputUri)?.use { input ->
+                inputFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CameraActivity", "ERROR copying video: ${e.message}")
+            Toast.makeText(this, "Error: No se pudo acceder al video", Toast.LENGTH_SHORT).show()
+            showPreview(null, inputUri)
+            return
+        }
         
-        if (inputPath == null) {
-            android.util.Log.e("CameraActivity", "ERROR: Could not get real path from URI")
+        val inputPath = inputFile.absolutePath
+        android.util.Log.d("CameraActivity", "Copied to: $inputPath, size: ${inputFile.length()}")
+        
+        if (!inputFile.exists() || inputFile.length() == 0L) {
+            android.util.Log.e("CameraActivity", "ERROR: Copied file is empty or doesn't exist")
             Toast.makeText(this, "Error: No se pudo acceder al video", Toast.LENGTH_SHORT).show()
             showPreview(null, inputUri)
             return
@@ -846,8 +1507,6 @@ class CameraActivity : AppCompatActivity() {
         android.util.Log.d("CameraActivity", "Frame path: $framePath")
         android.util.Log.d("CameraActivity", "Filter mode: $filterMode")
         android.util.Log.d("CameraActivity", "Slow motion: $slowMotionMode")
-        android.util.Log.d("CameraActivity", "Face filter type: $faceFilterType")
-        android.util.Log.d("CameraActivity", "Face filter path: $faceFilterPath")
         
         val intent = Intent(this, ProcessingActivity::class.java).apply {
             putExtra("INPUT_PATH", inputPath)
@@ -856,8 +1515,6 @@ class CameraActivity : AppCompatActivity() {
             putExtra("FILTER_MODE", filterMode)
             putExtra("SLOW_MOTION_MODE", slowMotionMode)
             putExtra("EVENT_NAME", eventName)
-            putExtra("FACE_FILTER_TYPE", faceFilterType)
-            putExtra("FACE_FILTER_PATH", faceFilterPath)
         }
         
         android.util.Log.d("CameraActivity", "Starting ProcessingActivity...")
@@ -1222,6 +1879,7 @@ class CameraActivity : AppCompatActivity() {
     
     private fun processVideoWithFilterAndFrame(inputUri: Uri) {
         Thread {
+            var inputFile: File? = null
             try {
                 runOnUiThread {
                     val message = if (filterMode != "normal" && frameMode != "none" && framePath.isNotEmpty()) {
@@ -1234,10 +1892,20 @@ class CameraActivity : AppCompatActivity() {
                     Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
                 }
                 
-                val inputPath = getRealPathFromURI(inputUri)
-                if (inputPath == null) {
+                // Copy input video to cache (works with Scoped Storage)
+                inputFile = File(cacheDir, "input_filter_${System.currentTimeMillis()}.mp4")
+                contentResolver.openInputStream(inputUri)?.use { input ->
+                    inputFile!!.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                val inputPath = inputFile!!.absolutePath
+                android.util.Log.d("VideoProcessing", "Copied to: $inputPath, size: ${inputFile!!.length()}")
+                
+                if (!inputFile!!.exists() || inputFile!!.length() == 0L) {
                     runOnUiThread {
-                        Toast.makeText(this, "Error: No se pudo acceder al video", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Error: No se pudo copiar el video", Toast.LENGTH_SHORT).show()
                         showPreview(null, inputUri)
                     }
                     return@Thread
@@ -1270,10 +1938,10 @@ class CameraActivity : AppCompatActivity() {
                         "cold" -> "colorbalance=bs=-0.2:ms=-0.1:hs=0.1"
                         else -> "null"
                     }
-                    "-i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[0:v]$videoFilter[filtered];[1:v]scale=iw:ih[scaled];[filtered][scaled]overlay=0:0\" -c:a copy -preset ultrafast -b:v 8M \"$outputPath\""
+                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[0:v]$videoFilter[filtered];[1:v]scale=iw:ih[scaled];[filtered][scaled]overlay=0:0\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else if (frameFile != null) {
                     // Only frame overlay - scale frame to match video size exactly
-                    "-i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[1:v]scale2ref[frame][video];[video][frame]overlay=0:0\" -c:a copy -preset ultrafast -b:v 8M \"$outputPath\""
+                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[1:v]scale2ref[frame][video];[video][frame]overlay=0:0\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else if (filterMode != "normal") {
                     // Only filter
                     val videoFilter = when (filterMode) {
@@ -1285,10 +1953,10 @@ class CameraActivity : AppCompatActivity() {
                         "cold" -> "colorbalance=bs=-0.2:ms=-0.1:hs=0.1"
                         else -> "null"
                     }
-                    "-i \"$inputPath\" -vf \"$videoFilter\" -c:a copy -preset ultrafast -b:v 8M \"$outputPath\""
+                    "-y -i \"$inputPath\" -vf \"$videoFilter\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else {
                     // No processing needed (shouldn't happen)
-                    "-i \"$inputPath\" -c copy \"$outputPath\""
+                    "-y -i \"$inputPath\" -c copy \"$outputPath\""
                 }
                 
                 android.util.Log.d("VideoProcessing", "FFmpeg command: $command")
@@ -1320,6 +1988,7 @@ class CameraActivity : AppCompatActivity() {
                         }
                         
                         outputFile.delete()
+                        inputFile?.delete()
                         
                         runOnUiThread {
                             Toast.makeText(this, "Video procesado correctamente", Toast.LENGTH_SHORT).show()
@@ -1327,12 +1996,14 @@ class CameraActivity : AppCompatActivity() {
                         }
                     } ?: run {
                         outputFile.delete()
+                        inputFile?.delete()
                         runOnUiThread {
                             Toast.makeText(this, "Error al guardar video", Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
                     outputFile.delete()
+                    inputFile?.delete()
                     runOnUiThread {
                         Toast.makeText(this, "Error procesando video", Toast.LENGTH_SHORT).show()
                         showPreview(null, inputUri)
@@ -1340,6 +2011,7 @@ class CameraActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                inputFile?.delete()
                 runOnUiThread {
                     Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                     showPreview(null, inputUri)
@@ -1690,8 +2362,6 @@ class CameraActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
-        toneGenerator?.release()
-        toneGenerator = null
     }
 
     companion object {

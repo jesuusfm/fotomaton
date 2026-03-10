@@ -19,16 +19,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.SegmentationMask
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
-import com.google.mlkit.vision.face.Face
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetector
-import com.google.mlkit.vision.face.FaceDetectorOptions
-import com.google.mlkit.vision.face.FaceLandmark
 import com.photobooth.app.databinding.ActivityProcessingBinding
-import android.graphics.Canvas
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.RectF
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -48,8 +39,6 @@ class ProcessingActivity : AppCompatActivity() {
     private var filterMode: String = "normal"
     private var slowMotionMode: String = "normal"
     private var eventName: String = "Evento"
-    private var faceFilterType: String = "none"
-    private var faceFilterPath: String = ""
     
     private var totalSteps = 4
     private var currentStep = 1
@@ -71,8 +60,6 @@ class ProcessingActivity : AppCompatActivity() {
         filterMode = intent.getStringExtra("FILTER_MODE") ?: "normal"
         slowMotionMode = intent.getStringExtra("SLOW_MOTION_MODE") ?: "normal"
         eventName = intent.getStringExtra("EVENT_NAME") ?: "Evento"
-        faceFilterType = intent.getStringExtra("FACE_FILTER_TYPE") ?: "none"
-        faceFilterPath = intent.getStringExtra("FACE_FILTER_PATH") ?: ""
         
         android.util.Log.d("ProcessingActivity", "Input path: $inputPath")
         android.util.Log.d("ProcessingActivity", "Background path: $backgroundPath")
@@ -80,8 +67,6 @@ class ProcessingActivity : AppCompatActivity() {
         android.util.Log.d("ProcessingActivity", "Filter mode: $filterMode")
         android.util.Log.d("ProcessingActivity", "Slow motion: $slowMotionMode")
         android.util.Log.d("ProcessingActivity", "Event name: $eventName")
-        android.util.Log.d("ProcessingActivity", "Face filter type: $faceFilterType")
-        android.util.Log.d("ProcessingActivity", "Face filter path: $faceFilterPath")
         
         // Disable back button during processing
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -91,19 +76,13 @@ class ProcessingActivity : AppCompatActivity() {
         })
         
         // Calculate total steps
-        val hasBackgroundRemoval = backgroundPath.isNotEmpty()
-        val hasFaceFilter = faceFilterType != "none" && faceFilterPath.isNotEmpty()
-        
-        totalSteps = 1 // Extract frames (always if any processing)
-        if (hasBackgroundRemoval) totalSteps++ // ML Kit background removal
-        if (hasFaceFilter) totalSteps++ // Face filter processing
-        totalSteps++ // Recompose video
+        totalSteps = 2 // Extract + ML Kit processing (always)
         if (filterMode != "normal") totalSteps++
         if (framePath.isNotEmpty()) totalSteps++
         if (slowMotionMode != "normal") totalSteps++
         totalSteps++ // Final save
         
-        if (inputPath.isEmpty() || (!hasBackgroundRemoval && !hasFaceFilter)) {
+        if (inputPath.isEmpty() || backgroundPath.isEmpty()) {
             updateStatus("Error: Parámetros inválidos")
             finishWithError()
             return
@@ -137,10 +116,6 @@ class ProcessingActivity : AppCompatActivity() {
         android.util.Log.d("ProcessingActivity", "========================================")
         android.util.Log.d("ProcessingActivity", "processVideo() STARTED")
         android.util.Log.d("ProcessingActivity", "========================================")
-        
-        val hasBackgroundRemoval = backgroundPath.isNotEmpty()
-        val hasFaceFilter = faceFilterType != "none" && faceFilterPath.isNotEmpty()
-        
         try {
             // Step 1: Extract frames
             currentStep = 1
@@ -176,9 +151,11 @@ class ProcessingActivity : AppCompatActivity() {
             android.util.Log.d("ProcessingActivity", "FFmpeg extract command: $extractCommand")
             val extractSession = FFmpegKit.execute(extractCommand)
             android.util.Log.d("ProcessingActivity", "FFmpeg return code: ${extractSession.returnCode}")
+            android.util.Log.d("ProcessingActivity", "FFmpeg output: ${extractSession.output}")
             
             if (!ReturnCode.isSuccess(extractSession.returnCode)) {
                 android.util.Log.e("ProcessingActivity", "FAILED to extract frames!")
+                android.util.Log.e("ProcessingActivity", "FFmpeg error: ${extractSession.failStackTrace}")
                 updateStatus("Error extrayendo frames")
                 cleanupAndFinish(framesDir, processedDir, null)
                 return
@@ -199,61 +176,34 @@ class ProcessingActivity : AppCompatActivity() {
                 return
             }
             
-            // Load resources
-            var bgBitmap: Bitmap? = null
-            var faceFilterBitmap: Bitmap? = null
-            var segmenter: com.google.mlkit.vision.segmentation.Segmenter? = null
-            var faceDetector: FaceDetector? = null
+            // Step 2: Process frames with ML Kit
+            currentStep = 2
+            android.util.Log.d("ProcessingActivity", "Step 2: Processing with ML Kit")
+            updateUI("Cargando modelo ML Kit...", 12, 2)
             
-            // Load background if needed
-            if (hasBackgroundRemoval) {
-                currentStep++
-                android.util.Log.d("ProcessingActivity", "Loading background from: $backgroundPath")
-                updateUI("Cargando fondo...", 12, currentStep)
-                bgBitmap = try {
-                    assets.open(backgroundPath).use { BitmapFactory.decodeStream(it) }
-                } catch (e: Exception) {
-                    android.util.Log.e("ProcessingActivity", "ERROR loading background: ${e.message}", e)
-                    updateStatus("Error cargando fondo: ${e.message}")
-                    cleanupAndFinish(framesDir, processedDir, null)
-                    return
-                }
-                android.util.Log.d("ProcessingActivity", "Background loaded: ${bgBitmap.width}x${bgBitmap.height}")
-                
-                // Initialize segmenter
-                segmenter = Segmentation.getClient(
-                    SelfieSegmenterOptions.Builder()
-                        .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
-                        .enableRawSizeMask()
-                        .build()
-                )
+            // Load background
+            android.util.Log.d("ProcessingActivity", "Loading background from: $backgroundPath")
+            val bgBitmap = try {
+                assets.open(backgroundPath).use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                android.util.Log.e("ProcessingActivity", "ERROR loading background: ${e.message}", e)
+                updateStatus("Error cargando fondo: ${e.message}")
+                cleanupAndFinish(framesDir, processedDir, null)
+                return
             }
+            android.util.Log.d("ProcessingActivity", "Background loaded: ${bgBitmap.width}x${bgBitmap.height}")
             
-            // Load face filter if needed
-            if (hasFaceFilter) {
-                currentStep++
-                android.util.Log.d("ProcessingActivity", "Loading face filter from: $faceFilterPath")
-                updateUI("Cargando filtro facial...", 14, currentStep)
-                faceFilterBitmap = try {
-                    assets.open(faceFilterPath).use { BitmapFactory.decodeStream(it) }
-                } catch (e: Exception) {
-                    android.util.Log.e("ProcessingActivity", "ERROR loading face filter: ${e.message}", e)
-                    updateStatus("Error cargando filtro facial")
-                    cleanupAndFinish(framesDir, processedDir, null)
-                    return
-                }
-                android.util.Log.d("ProcessingActivity", "Face filter loaded: ${faceFilterBitmap.width}x${faceFilterBitmap.height}")
-                
-                // Initialize face detector with landmarks
-                val faceDetectorOptions = FaceDetectorOptions.Builder()
-                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-                    .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                    .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+            // Initialize segmenter with raw size mask for better quality
+            android.util.Log.d("ProcessingActivity", "Initializing ML Kit segmenter...")
+            val segmenter = Segmentation.getClient(
+                SelfieSegmenterOptions.Builder()
+                    .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                    .enableRawSizeMask()
                     .build()
-                faceDetector = FaceDetection.getClient(faceDetectorOptions)
-            }
+            )
+            android.util.Log.d("ProcessingActivity", "Segmenter initialized")
             
-            updateUI("Procesando frames (0/$totalFrames)...", 15, currentStep)
+            updateUI("Procesando frames con ML Kit (0/$totalFrames)...", 15, 2)
             
             val processedCount = AtomicInteger(0)
             val latch = CountDownLatch(totalFrames)
@@ -262,105 +212,85 @@ class ProcessingActivity : AppCompatActivity() {
             frameFiles.forEachIndexed { index, frameFile ->
                 if (index == 0) {
                     android.util.Log.d("ProcessingActivity", "Processing FIRST frame: ${frameFile.absolutePath}")
+                    android.util.Log.d("ProcessingActivity", "Frame file exists: ${frameFile.exists()}, size: ${frameFile.length()}")
                 }
-                
-                var frameBitmap = BitmapFactory.decodeFile(frameFile.absolutePath)
+                if (index % 50 == 0) {
+                    android.util.Log.d("ProcessingActivity", "Queuing frame $index/$totalFrames")
+                }
+                val frameBitmap = BitmapFactory.decodeFile(frameFile.absolutePath)
                 if (frameBitmap == null) {
-                    android.util.Log.e("ProcessingActivity", "ERROR: Could not decode frame $index")
+                    android.util.Log.e("ProcessingActivity", "ERROR: Could not decode frame $index: ${frameFile.absolutePath}")
                     latch.countDown()
                     return@forEachIndexed
                 }
-                
-                // Make bitmap mutable for drawing
-                frameBitmap = frameBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                if (index == 0) {
+                    android.util.Log.d("ProcessingActivity", "First frame decoded: ${frameBitmap.width}x${frameBitmap.height}")
+                }
                 
                 val inputImage = InputImage.fromBitmap(frameBitmap, 0)
                 
-                // Process background removal first (if enabled)
-                if (hasBackgroundRemoval && segmenter != null && bgBitmap != null) {
-                    val finalFrameBitmap = frameBitmap
-                    segmenter.process(inputImage)
-                        .addOnSuccessListener { mask ->
-                            var processed = applyBackgroundToFrame(finalFrameBitmap, mask, bgBitmap)
-                            
-                            // Then apply face filter (if enabled)
-                            if (hasFaceFilter && faceDetector != null && faceFilterBitmap != null) {
-                                val processedImage = InputImage.fromBitmap(processed, 0)
-                                faceDetector.process(processedImage)
-                                    .addOnSuccessListener { faces ->
-                                        processed = applyFaceFilter(processed, faces, faceFilterBitmap, faceFilterType)
-                                        saveProcessedFrame(processed, processedDir, index, processedCount, totalFrames, latch)
-                                    }
-                                    .addOnFailureListener {
-                                        saveProcessedFrame(processed, processedDir, index, processedCount, totalFrames, latch)
-                                    }
-                            } else {
-                                saveProcessedFrame(processed, processedDir, index, processedCount, totalFrames, latch)
-                            }
-                            finalFrameBitmap.recycle()
+                segmenter.process(inputImage)
+                    .addOnSuccessListener { mask ->
+                        val processed = applyBackgroundToFrame(frameBitmap, mask, bgBitmap)
+                        
+                        // Save processed frame
+                        val outputFile = File(processedDir, "frame_%05d.png".format(index + 1))
+                        FileOutputStream(outputFile).use { out ->
+                            processed.compress(Bitmap.CompressFormat.PNG, 100, out)
                         }
-                        .addOnFailureListener { e ->
-                            android.util.Log.w("ProcessingActivity", "Frame $index bg removal failed: ${e.message}")
-                            // Try face filter on original
-                            if (hasFaceFilter && faceDetector != null && faceFilterBitmap != null) {
-                                faceDetector.process(inputImage)
-                                    .addOnSuccessListener { faces ->
-                                        val processed = applyFaceFilter(finalFrameBitmap, faces, faceFilterBitmap, faceFilterType)
-                                        saveProcessedFrame(processed, processedDir, index, processedCount, totalFrames, latch)
-                                    }
-                                    .addOnFailureListener {
-                                        frameFile.copyTo(File(processedDir, frameFile.name), overwrite = true)
-                                        processedCount.incrementAndGet()
-                                        latch.countDown()
-                                    }
-                            } else {
-                                frameFile.copyTo(File(processedDir, frameFile.name), overwrite = true)
-                                processedCount.incrementAndGet()
-                                latch.countDown()
-                            }
+                        
+                        processed.recycle()
+                        frameBitmap.recycle()
+                        
+                        val count = processedCount.incrementAndGet()
+                        val progress = 15 + (count * 50 / totalFrames)
+                        if (count % 50 == 0) {
+                            android.util.Log.d("ProcessingActivity", "Processed $count/$totalFrames frames")
                         }
-                } else if (hasFaceFilter && faceDetector != null && faceFilterBitmap != null) {
-                    // Only face filter, no background removal
-                    val finalFrameBitmap = frameBitmap
-                    faceDetector.process(inputImage)
-                        .addOnSuccessListener { faces ->
-                            val processed = applyFaceFilter(finalFrameBitmap, faces, faceFilterBitmap, faceFilterType)
-                            saveProcessedFrame(processed, processedDir, index, processedCount, totalFrames, latch)
-                        }
-                        .addOnFailureListener { e ->
-                            android.util.Log.w("ProcessingActivity", "Frame $index face detection failed: ${e.message}")
-                            frameFile.copyTo(File(processedDir, frameFile.name), overwrite = true)
-                            processedCount.incrementAndGet()
-                            latch.countDown()
-                        }
-                } else {
-                    // No processing needed - just copy
-                    frameFile.copyTo(File(processedDir, frameFile.name), overwrite = true)
-                    processedCount.incrementAndGet()
-                    latch.countDown()
-                }
+                        updateUI("Procesando frames con ML Kit ($count/$totalFrames)...", progress, 2)
+                        
+                        latch.countDown()
+                    }
+                    .addOnFailureListener { e ->
+                        android.util.Log.w("ProcessingActivity", "Frame $index failed: ${e.message}")
+                        // Copy original frame on failure
+                        frameFile.copyTo(File(processedDir, frameFile.name), overwrite = true)
+                        frameBitmap.recycle()
+                        processedCount.incrementAndGet()
+                        latch.countDown()
+                    }
             }
             
             // Wait for all frames (max 15 minutes)
+            android.util.Log.d("ProcessingActivity", "========================================")
             android.util.Log.d("ProcessingActivity", "Waiting for all $totalFrames frames to be processed...")
+            android.util.Log.d("ProcessingActivity", "Current processed count: ${processedCount.get()}")
+            android.util.Log.d("ProcessingActivity", "========================================")
             val allProcessed = latch.await(15, TimeUnit.MINUTES)
-            android.util.Log.d("ProcessingActivity", "Wait completed. allProcessed: $allProcessed, count: ${processedCount.get()}")
+            android.util.Log.d("ProcessingActivity", "========================================")
+            android.util.Log.d("ProcessingActivity", "Wait completed. allProcessed: $allProcessed")
+            android.util.Log.d("ProcessingActivity", "Final processed count: ${processedCount.get()}")
+            android.util.Log.d("ProcessingActivity", "========================================")
             
-            // Cleanup
-            bgBitmap?.recycle()
-            faceFilterBitmap?.recycle()
-            segmenter?.close()
-            faceDetector?.close()
+            bgBitmap.recycle()
+            segmenter.close()
+            
+            // Clean up original frames
+            android.util.Log.d("ProcessingActivity", "Cleaning up original frames")
             framesDir.deleteRecursively()
             
             // Check processed frames
             val processedFiles = processedDir.listFiles()
             android.util.Log.d("ProcessingActivity", "Processed frames in dir: ${processedFiles?.size ?: 0}")
+            if (processedFiles != null && processedFiles.isNotEmpty()) {
+                android.util.Log.d("ProcessingActivity", "First processed file: ${processedFiles[0].absolutePath}")
+                android.util.Log.d("ProcessingActivity", "First processed file size: ${processedFiles[0].length()}")
+            }
             
-            // Step: Recompose video
-            currentStep++
-            android.util.Log.d("ProcessingActivity", "Step $currentStep: Recomposing video")
-            updateUI("Recomponiendo video...", 70, currentStep)
+            // Step 3: Recompose video
+            currentStep = 3
+            android.util.Log.d("ProcessingActivity", "Step 3: Recomposing video")
+            updateUI("Recomponiendo video...", 70, 3)
             
             var currentOutputFile = File(cacheDir, "bg_processed_${System.currentTimeMillis()}.mp4")
             
@@ -429,28 +359,41 @@ class ProcessingActivity : AppCompatActivity() {
                 }
             }
             
-            // Step 5: Apply slow motion if needed
-            if (slowMotionMode != "normal") {
+            // Step 5: Apply slow motion if needed (only for 0.5x; boomerang modes are handled elsewhere)
+            if (slowMotionMode == "0.5x") {
                 currentStep++
                 updateUI("Aplicando cámara lenta...", 90, currentStep)
                 
                 val slowOutputFile = File(cacheDir, "slow_${System.currentTimeMillis()}.mp4")
                 val slowFactor = if (slowMotionMode == "0.5x") 2.0 else 1.5
                 
-                val slowCommand = "-i \"${currentOutputFile.absolutePath}\" " +
-                        "-filter_complex \"[0:v]setpts=${slowFactor}*PTS[v];[0:a]atempo=${1/slowFactor}[a]\" " +
-                        "-map \"[v]\" -map \"[a]\" -preset ultrafast -b:v 8M \"${slowOutputFile.absolutePath}\""
+                // Check if video has audio
+                val probeSession = FFprobeKit.getMediaInformation(currentOutputFile.absolutePath)
+                val hasAudio = probeSession.mediaInformation?.streams?.any { it.type == "audio" } == true
+                android.util.Log.d("ProcessingActivity", "Video has audio: $hasAudio")
                 
+                val slowCommand = if (hasAudio) {
+                    "-y -i \"${currentOutputFile.absolutePath}\" " +
+                            "-filter_complex \"[0:v]setpts=${slowFactor}*PTS[v];[0:a]atempo=${1/slowFactor}[a]\" " +
+                            "-map \"[v]\" -map \"[a]\" -c:v mpeg4 -pix_fmt yuv420p -b:v 8M -c:a aac \"${slowOutputFile.absolutePath}\""
+                } else {
+                    "-y -i \"${currentOutputFile.absolutePath}\" " +
+                            "-vf \"setpts=${slowFactor}*PTS\" " +
+                            "-c:v mpeg4 -pix_fmt yuv420p -b:v 8M -an \"${slowOutputFile.absolutePath}\""
+                }
+                
+                android.util.Log.d("ProcessingActivity", "Slow motion command: $slowCommand")
                 val slowSession = FFmpegKit.execute(slowCommand)
+                android.util.Log.d("ProcessingActivity", "Slow motion result: ${slowSession.returnCode}")
                 
-                currentOutputFile.delete()
-                
-                if (ReturnCode.isSuccess(slowSession.returnCode)) {
+                if (ReturnCode.isSuccess(slowSession.returnCode) && slowOutputFile.exists() && slowOutputFile.length() > 0) {
+                    currentOutputFile.delete()
                     currentOutputFile = slowOutputFile
                     updateUI("Cámara lenta aplicada", 95, currentStep)
                 } else {
-                    // Continue without slow motion
-                    currentOutputFile = slowOutputFile
+                    // Failed - keep original file, delete failed output
+                    android.util.Log.e("ProcessingActivity", "Slow motion failed, keeping original")
+                    slowOutputFile.delete()
                 }
             }
             
@@ -484,250 +427,6 @@ class ProcessingActivity : AppCompatActivity() {
             updateStatus("Error: ${e.message}")
             finishWithError()
         }
-    }
-    
-    private fun saveProcessedFrame(
-        bitmap: Bitmap,
-        processedDir: File,
-        index: Int,
-        processedCount: AtomicInteger,
-        totalFrames: Int,
-        latch: CountDownLatch
-    ) {
-        try {
-            val outputFile = File(processedDir, "frame_%05d.png".format(index + 1))
-            FileOutputStream(outputFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-            bitmap.recycle()
-            
-            val count = processedCount.incrementAndGet()
-            val progress = 15 + (count * 50 / totalFrames)
-            if (count % 10 == 0) {
-                updateUI("Procesando frames ($count/$totalFrames)...", progress, currentStep)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ProcessingActivity", "Error saving frame $index: ${e.message}")
-        } finally {
-            latch.countDown()
-        }
-    }
-    
-    /**
-     * Apply face filter overlay based on face detection results
-     */
-    private fun applyFaceFilter(original: Bitmap, faces: List<Face>, filterBitmap: Bitmap, filterType: String): Bitmap {
-        if (faces.isEmpty()) {
-            return original
-        }
-        
-        val result = original.copy(Bitmap.Config.ARGB_8888, true)
-        val canvas = Canvas(result)
-        val paint = Paint().apply {
-            isAntiAlias = true
-            isFilterBitmap = true
-        }
-        
-        for (face in faces) {
-            val boundingBox = face.boundingBox
-            val faceWidth = boundingBox.width().toFloat()
-            val faceHeight = boundingBox.height().toFloat()
-            
-            // Calculate filter position and size based on filter type
-            when (filterType) {
-                "mustache" -> {
-                    // Position mustache below nose
-                    val noseLandmark = face.getLandmark(FaceLandmark.NOSE_BASE)
-                    val mouthLeft = face.getLandmark(FaceLandmark.MOUTH_LEFT)
-                    val mouthRight = face.getLandmark(FaceLandmark.MOUTH_RIGHT)
-                    
-                    if (noseLandmark != null) {
-                        val filterWidth = faceWidth * 0.6f
-                        val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                        
-                        val centerX = noseLandmark.position.x
-                        val centerY = if (mouthLeft != null && mouthRight != null) {
-                            (noseLandmark.position.y + (mouthLeft.position.y + mouthRight.position.y) / 2) / 2
-                        } else {
-                            noseLandmark.position.y + faceHeight * 0.1f
-                        }
-                        
-                        val destRect = RectF(
-                            centerX - filterWidth / 2,
-                            centerY - filterHeight / 2,
-                            centerX + filterWidth / 2,
-                            centerY + filterHeight / 2
-                        )
-                        
-                        // Apply rotation based on face angle
-                        val rotationZ = face.headEulerAngleZ
-                        canvas.save()
-                        canvas.rotate(rotationZ, centerX, centerY)
-                        canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                        canvas.restore()
-                    }
-                }
-                
-                "hat" -> {
-                    // Position hat above head
-                    val filterWidth = faceWidth * 1.3f
-                    val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                    
-                    val centerX = boundingBox.centerX().toFloat()
-                    val topY = boundingBox.top - filterHeight * 0.3f
-                    
-                    val destRect = RectF(
-                        centerX - filterWidth / 2,
-                        topY - filterHeight * 0.7f,
-                        centerX + filterWidth / 2,
-                        topY + filterHeight * 0.3f
-                    )
-                    
-                    val rotationZ = face.headEulerAngleZ
-                    canvas.save()
-                    canvas.rotate(rotationZ, centerX, boundingBox.centerY().toFloat())
-                    canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                    canvas.restore()
-                }
-                
-                "glasses" -> {
-                    // Position glasses over eyes
-                    val leftEye = face.getLandmark(FaceLandmark.LEFT_EYE)
-                    val rightEye = face.getLandmark(FaceLandmark.RIGHT_EYE)
-                    
-                    if (leftEye != null && rightEye != null) {
-                        val eyeDistance = kotlin.math.abs(rightEye.position.x - leftEye.position.x)
-                        val filterWidth = eyeDistance * 2.2f
-                        val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                        
-                        val centerX = (leftEye.position.x + rightEye.position.x) / 2
-                        val centerY = (leftEye.position.y + rightEye.position.y) / 2
-                        
-                        val destRect = RectF(
-                            centerX - filterWidth / 2,
-                            centerY - filterHeight / 2,
-                            centerX + filterWidth / 2,
-                            centerY + filterHeight / 2
-                        )
-                        
-                        val rotationZ = face.headEulerAngleZ
-                        canvas.save()
-                        canvas.rotate(rotationZ, centerX, centerY)
-                        canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                        canvas.restore()
-                    }
-                }
-                
-                "mask" -> {
-                    // Position mask over entire face
-                    val filterWidth = faceWidth * 1.2f
-                    val filterHeight = faceHeight * 1.2f
-                    
-                    val centerX = boundingBox.centerX().toFloat()
-                    val centerY = boundingBox.centerY().toFloat()
-                    
-                    val destRect = RectF(
-                        centerX - filterWidth / 2,
-                        centerY - filterHeight / 2,
-                        centerX + filterWidth / 2,
-                        centerY + filterHeight / 2
-                    )
-                    
-                    val rotationZ = face.headEulerAngleZ
-                    canvas.save()
-                    canvas.rotate(rotationZ, centerX, centerY)
-                    canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                    canvas.restore()
-                }
-                
-                "ears" -> {
-                    // Position ears on sides of head (like bunny/cat ears)
-                    val filterWidth = faceWidth * 1.5f
-                    val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                    
-                    val centerX = boundingBox.centerX().toFloat()
-                    val topY = boundingBox.top.toFloat()
-                    
-                    val destRect = RectF(
-                        centerX - filterWidth / 2,
-                        topY - filterHeight * 0.8f,
-                        centerX + filterWidth / 2,
-                        topY + filterHeight * 0.2f
-                    )
-                    
-                    val rotationZ = face.headEulerAngleZ
-                    canvas.save()
-                    canvas.rotate(rotationZ, centerX, boundingBox.centerY().toFloat())
-                    canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                    canvas.restore()
-                }
-                
-                "nose" -> {
-                    // Position nose filter over nose
-                    val noseLandmark = face.getLandmark(FaceLandmark.NOSE_BASE)
-                    
-                    if (noseLandmark != null) {
-                        val filterWidth = faceWidth * 0.35f
-                        val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                        
-                        val centerX = noseLandmark.position.x
-                        val centerY = noseLandmark.position.y - faceHeight * 0.05f
-                        
-                        val destRect = RectF(
-                            centerX - filterWidth / 2,
-                            centerY - filterHeight / 2,
-                            centerX + filterWidth / 2,
-                            centerY + filterHeight / 2
-                        )
-                        
-                        val rotationZ = face.headEulerAngleZ
-                        canvas.save()
-                        canvas.rotate(rotationZ, centerX, centerY)
-                        canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                        canvas.restore()
-                    }
-                }
-                
-                "full" -> {
-                    // Full face overlay - scale to fit entire face area
-                    val filterWidth = faceWidth * 1.4f
-                    val filterHeight = faceHeight * 1.6f
-                    
-                    val centerX = boundingBox.centerX().toFloat()
-                    val centerY = boundingBox.centerY().toFloat() - faceHeight * 0.1f
-                    
-                    val destRect = RectF(
-                        centerX - filterWidth / 2,
-                        centerY - filterHeight / 2,
-                        centerX + filterWidth / 2,
-                        centerY + filterHeight / 2
-                    )
-                    
-                    val rotationZ = face.headEulerAngleZ
-                    canvas.save()
-                    canvas.rotate(rotationZ, centerX, centerY)
-                    canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                    canvas.restore()
-                }
-                
-                else -> {
-                    // Default: center on face
-                    val filterWidth = faceWidth
-                    val filterHeight = filterWidth * filterBitmap.height / filterBitmap.width
-                    
-                    val destRect = RectF(
-                        boundingBox.left.toFloat(),
-                        boundingBox.centerY() - filterHeight / 2,
-                        boundingBox.right.toFloat(),
-                        boundingBox.centerY() + filterHeight / 2
-                    )
-                    
-                    canvas.drawBitmap(filterBitmap, null, destRect, paint)
-                }
-            }
-        }
-        
-        return result
     }
     
     private fun getFFmpegFilter(filter: String): String {
@@ -854,6 +553,10 @@ class ProcessingActivity : AppCompatActivity() {
     }
     
     private fun finishWithSuccess(uri: Uri) {
+        // Clean up temp input file if it's in cache
+        if (inputPath.contains(cacheDir.absolutePath)) {
+            File(inputPath).delete()
+        }
         val resultIntent = Intent()
         resultIntent.putExtra("RESULT_URI", uri.toString())
         resultIntent.putExtra("SUCCESS", true)
@@ -862,6 +565,10 @@ class ProcessingActivity : AppCompatActivity() {
     }
     
     private fun finishWithError() {
+        // Clean up temp input file if it's in cache
+        if (inputPath.contains(cacheDir.absolutePath)) {
+            File(inputPath).delete()
+        }
         runOnUiThread {
             Thread.sleep(2000) // Show error message for 2 seconds
             setResult(Activity.RESULT_CANCELED)

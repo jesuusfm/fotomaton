@@ -15,18 +15,18 @@ class VideoConfigActivity : AppCompatActivity() {
     private lateinit var binding: ActivityVideoConfigBinding
     private lateinit var eventName: String
     private var videoDuration = 10 // seconds
-    private var slowMotionMode = "normal" // normal, 0.5x, boomerang
-    private var boomerangMinSpeed = 0.5f // 0.3 - 0.8
-    private var boomerangMaxSpeed = 1.0f // 0.5 - 1.5
-    private var boomerangFrequency = 0.1f // 0.05 - 0.30
+    private var slowMotionMode = "normal" // normal, 0.5x, boomerang, boomerang_reverse
+    private var boomerangMinSpeed = 0.5f
+    private var boomerangMaxSpeed = 1.0f
+    private var boomerangSlowDuration = 3.0f  // seconds at slow speed
+    private var boomerangFastDuration = 3.0f  // seconds at fast speed
     private var filterMode = "normal"
+    private var videoQuality = "UHD" // SD, HD, FHD, UHD (4K)
     private var frameMode = "none"
     private var framePath = ""
     private var backgroundMode = "none"
     private var backgroundPath = ""
     private var removeBackground = false
-    private var faceFilterType = "none"
-    private var faceFilterPath = ""
     
     // Frame preview launcher
     private val framePreviewLauncher = registerForActivityResult(
@@ -70,27 +70,6 @@ class VideoConfigActivity : AppCompatActivity() {
                     binding.backgroundStatus.visibility = View.GONE
                     removeBackground = false
                     binding.switchRemoveBackground.isChecked = false
-                }
-            }
-        }
-    }
-    
-    // Face filter launcher
-    private val faceFilterLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.let { data ->
-                faceFilterType = data.getStringExtra("FILTER_TYPE") ?: "none"
-                faceFilterPath = data.getStringExtra("FILTER_PATH") ?: ""
-                val filterName = data.getStringExtra("FILTER_NAME") ?: ""
-                
-                if (faceFilterType != "none") {
-                    binding.faceFilterStatus.text = "✓ Filtro facial: $filterName"
-                    binding.faceFilterStatus.visibility = View.VISIBLE
-                } else {
-                    binding.faceFilterStatus.text = ""
-                    binding.faceFilterStatus.visibility = View.GONE
                 }
             }
         }
@@ -158,9 +137,10 @@ class VideoConfigActivity : AppCompatActivity() {
             slowMotionMode = when(checkedId) {
                 R.id.radio_slow_05x -> "0.5x"
                 R.id.radio_boomerang -> "boomerang"
+                R.id.radio_boomerang_reverse -> "boomerang_reverse"
                 else -> "normal"
             }
-            // Show/hide boomerang parameters
+            // Show/hide boomerang parameters (only for oscillating mode)
             binding.boomerangParams.visibility = if (slowMotionMode == "boomerang") {
                 android.view.View.VISIBLE
             } else {
@@ -169,28 +149,55 @@ class VideoConfigActivity : AppCompatActivity() {
         }
 
         // Boomerang parameters
+        // Min speed: 0.1x to 3.0x, step 0.1x, seekbar max=29
+        binding.seekBarMinSpeed.max = 29
+        binding.seekBarMinSpeed.progress = 4 // default 0.5x
+        binding.minSpeedValue.text = "0.50x"
         binding.seekBarMinSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                boomerangMinSpeed = 0.3f + (progress / 100f) // 0.3 - 0.8
+                boomerangMinSpeed = 0.1f + progress * 0.1f // 0.1 - 3.0
                 binding.minSpeedValue.text = "%.2fx".format(boomerangMinSpeed)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // Max speed: 0.1x to 3.0x, step 0.1x, seekbar max=29
+        binding.seekBarMaxSpeed.max = 29
+        binding.seekBarMaxSpeed.progress = 9 // default 1.0x
+        binding.maxSpeedValue.text = "1.00x"
         binding.seekBarMaxSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                boomerangMaxSpeed = 0.5f + (progress / 50f) // 0.5 - 1.5
+                boomerangMaxSpeed = 0.1f + progress * 0.1f // 0.1 - 3.0
                 binding.maxSpeedValue.text = "%.2fx".format(boomerangMaxSpeed)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // Slow duration: 0.5s to 10s, step 0.5s, seekbar max=19
+        binding.seekBarFrequency.max = 19
+        binding.seekBarFrequency.progress = 5 // default 3.0s
+        binding.frequencyValue.text = "3.0s"
+        boomerangSlowDuration = 3.0f
         binding.seekBarFrequency.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                boomerangFrequency = 0.05f + (progress / 100f) // 0.05 - 0.30
-                binding.frequencyValue.text = "%.2f".format(boomerangFrequency)
+                boomerangSlowDuration = 0.5f + progress * 0.5f // 0.5s - 10s
+                binding.frequencyValue.text = "%.1fs".format(boomerangSlowDuration)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Fast duration: 0.5s to 10s, step 0.5s, seekbar max=19
+        binding.seekBarFastDuration.max = 19
+        binding.seekBarFastDuration.progress = 5 // default 3.0s
+        binding.fastDurationValue.text = "3.0s"
+        boomerangFastDuration = 3.0f
+        binding.seekBarFastDuration.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                boomerangFastDuration = 0.5f + progress * 0.5f // 0.5s - 10s
+                binding.fastDurationValue.text = "%.1fs".format(boomerangFastDuration)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -208,34 +215,31 @@ class VideoConfigActivity : AppCompatActivity() {
             backgroundPreviewLauncher.launch(intent)
         }
         
-        // Face filter selection button
-        binding.buttonSelectFaceFilter.setOnClickListener {
-            val intent = Intent(this, FaceFilterActivity::class.java)
-            faceFilterLauncher.launch(intent)
-        }
-        
         // Remove background switch
         binding.switchRemoveBackground.setOnCheckedChangeListener { _, isChecked ->
             removeBackground = isChecked
         }
 
         binding.buttonStart.setOnClickListener {
+            android.util.Log.d("VideoConfigActivity", "=== INICIANDO CÁMARA ===")
+            android.util.Log.d("VideoConfigActivity", "videoQuality=$videoQuality")
+            
             val intent = Intent(this, CameraActivity::class.java)
             intent.putExtra("EVENT_NAME", eventName)
             intent.putExtra("MODE", "VIDEO")
             intent.putExtra("FILTER", filterMode)
+            intent.putExtra("VIDEO_QUALITY", videoQuality)
             intent.putExtra("VIDEO_DURATION", videoDuration)
             intent.putExtra("SLOW_MOTION_MODE", slowMotionMode)
             intent.putExtra("BOOMERANG_MIN_SPEED", boomerangMinSpeed)
             intent.putExtra("BOOMERANG_MAX_SPEED", boomerangMaxSpeed)
-            intent.putExtra("BOOMERANG_FREQUENCY", boomerangFrequency)
+            intent.putExtra("BOOMERANG_SLOW_DURATION", boomerangSlowDuration)
+            intent.putExtra("BOOMERANG_FAST_DURATION", boomerangFastDuration)
             intent.putExtra("FRAME", frameMode)
             intent.putExtra("FRAME_PATH", framePath)
             intent.putExtra("BACKGROUND", backgroundMode)
             intent.putExtra("BACKGROUND_PATH", backgroundPath)
             intent.putExtra("REMOVE_BG", removeBackground)
-            intent.putExtra("FACE_FILTER_TYPE", faceFilterType)
-            intent.putExtra("FACE_FILTER_PATH", faceFilterPath)
             startActivity(intent)
         }
     }

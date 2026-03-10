@@ -129,7 +129,14 @@
             android:id="@+id/radio_boomerang"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Boomerang (oscilante 0.5x-1.0x)"
+            android:text="Oscilante (0.5x-1.0x)"
+            android:textSize="18sp" />
+
+        <RadioButton
+            android:id="@+id/radio_boomerang_reverse"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Boomerang (ida y vuelta, sin audio)"
             android:textSize="18sp" />
 
     </RadioGroup>
@@ -205,7 +212,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Frecuencia de Oscilación"
+            android:text="🐢 Tiempo efecto cámara lenta (seg)"
             android:textSize="14sp"
             android:textColor="#333333"
             android:layout_marginTop="12dp" />
@@ -214,7 +221,7 @@
             android:id="@+id/frequency_value"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0.10"
+            android:text="3.0s"
             android:textSize="14sp"
             android:textColor="#6200EE" />
 
@@ -222,7 +229,30 @@
             android:id="@+id/seek_bar_frequency"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:max="25"
+            android:max="19"
+            android:progress="5" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⚡ Tiempo efecto cámara rápida (seg)"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:id="@+id/fast_duration_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="3.0s"
+            android:textSize="14sp"
+            android:textColor="#6200EE" />
+
+        <SeekBar
+            android:id="@+id/seek_bar_fast_duration"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
             android:progress="5" />
 
     </LinearLayout>
@@ -323,57 +353,6 @@
         android:textSize="12sp"
         android:textColor="#FF6600"
         app:layout_constraintTop_toBottomOf="@id/switch_remove_background"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="8dp" />
-
-    <!-- Face Filter section -->
-    <TextView
-        android:id="@+id/face_filter_label"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Filtros Faciales"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="#333333"
-        app:layout_constraintTop_toBottomOf="@id/background_warning"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="32dp" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_select_face_filter"
-        android:layout_width="0dp"
-        android:layout_height="56dp"
-        android:text="🎭 Seleccionar Filtro Facial"
-        android:textSize="16sp"
-        app:icon="@android:drawable/ic_menu_myplaces"
-        app:iconGravity="start"
-        style="@style/Widget.Material3.Button.OutlinedButton"
-        app:layout_constraintTop_toBottomOf="@id/face_filter_label"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="16dp" />
-
-    <TextView
-        android:id="@+id/face_filter_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textSize="14sp"
-        android:textColor="?attr/colorPrimary"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/button_select_face_filter"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="8dp" />
-
-    <TextView
-        android:id="@+id/face_filter_info"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="🎩 Bigotes, gorros, máscaras y más para las caras detectadas"
-        android:textSize="12sp"
-        android:textColor="#666666"
-        app:layout_constraintTop_toBottomOf="@id/face_filter_status"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp"

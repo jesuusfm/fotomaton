@@ -1,15 +1,28 @@
 *.iml
 .gradle
-/local.properties
+local.properties
+app/local.properties
+
+# Android build outputs
+/build/
+/app/build/
+app/build/
+
+# IntelliJ / Android Studio
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/
 .DS_Store
-/build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
+# Decompiled APK sources (not part of the project source)
+/decompiled/
+
+# Kotlin incremental compilation cache
+app/kotlin/
