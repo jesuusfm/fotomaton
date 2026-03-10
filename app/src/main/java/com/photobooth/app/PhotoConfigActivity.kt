@@ -20,6 +20,7 @@ class PhotoConfigActivity : AppCompatActivity() {
     private var backgroundMode = "none"
     private var backgroundPath = ""
     private var removeBackground = false
+    private var cameraSource = "phone" // "phone" or "usb"
 
     private val filterOptions = arrayOf(
         "✨ Normal",
@@ -119,6 +120,11 @@ class PhotoConfigActivity : AppCompatActivity() {
             backgroundPreviewLauncher.launch(intent)
         }
 
+        // Camera source selector
+        binding.chipGroupCameraSource.setOnCheckedStateChangeListener { _, checkedIds ->
+            cameraSource = if (checkedIds.contains(R.id.chip_usb_camera)) "usb" else "phone"
+        }
+
         // Photo booth mode
         binding.switchPhotoBooth.setOnCheckedChangeListener { _, isChecked ->
             isPhotoBoothMode = isChecked
@@ -135,6 +141,7 @@ class PhotoConfigActivity : AppCompatActivity() {
             intent.putExtra("BACKGROUND", backgroundMode)
             intent.putExtra("BACKGROUND_PATH", backgroundPath)
             intent.putExtra("REMOVE_BG", removeBackground)
+            intent.putExtra("CAMERA_SOURCE", cameraSource)
             startActivity(intent)
         }
     }

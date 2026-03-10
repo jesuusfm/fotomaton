@@ -90,6 +90,13 @@ class CameraActivity : AppCompatActivity() {
     private var removeBackground = false
     private var faceFilterType = "none"
     private var faceFilterPath = ""
+    private var cameraSource = "phone" // "phone" or "usb"
+    
+    // UVC camera
+    private var uvcCameraHelper: com.jiangdg.usbcamera.UVCCameraHelper? = null
+    private var uvcTextureView: com.serenegiant.usb.widget.UVCCameraTextureView? = null
+    private var isUvcPreview = false
+    private var isUvcCameraOpened = false
 
     // Photo booth
     private val photoBoothBitmaps = mutableListOf<Bitmap>()
@@ -177,6 +184,7 @@ class CameraActivity : AppCompatActivity() {
         removeBackground = intent.getBooleanExtra("REMOVE_BG", false)
         faceFilterType = intent.getStringExtra("FACE_FILTER_TYPE") ?: "none"
         faceFilterPath = intent.getStringExtra("FACE_FILTER_PATH") ?: ""
+        cameraSource = intent.getStringExtra("CAMERA_SOURCE") ?: "phone"
         
         // Update filter indicator
         updateFilterIndicator()
@@ -191,7 +199,11 @@ class CameraActivity : AppCompatActivity() {
         
         // Request permissions
         if (allPermissionsGranted()) {
-            startCamera()
+            if (cameraSource == "usb") {
+                startUvcCamera()
+            } else {
+                startCamera()
+            }
         } else {
             ActivityCompat.requestPermissions(
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
@@ -202,10 +214,14 @@ class CameraActivity : AppCompatActivity() {
         binding.buttonFlipCamera.setOnClickListener {
             flipCamera()
         }
+        
+        // Hide flip camera button for USB camera (only one external camera)
+        if (cameraSource == "usb") {
+            binding.buttonFlipCamera.visibility = View.GONE
+        }
 
         binding.buttonCapture.setOnClickListener {
-            if (recording != null) {
-                // Stop recording if currently recording
+            if (recording != null || (cameraSource == "usb" && uvcCameraHelper?.isPushing == true)) {
                 stopVideoRecording()
             } else {
                 startCountdown()
@@ -296,6 +312,195 @@ class CameraActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun startUvcCamera() {
+        // Hide CameraX preview, show UVC container
+        binding.previewView.visibility = View.GONE
+        binding.uvcPreviewContainer.visibility = View.VISIBLE
+        binding.usbStatusContainer.visibility = View.VISIBLE
+        binding.usbStatusText.text = "🔌 Buscando cámara USB..."
+        binding.buttonUsbRetry.visibility = View.GONE
+
+        try {
+            // Cleanup previous UVC state (needed for retry: release() nulls mUSBMonitor
+            // so that setDefaultFrameFormat/setDefaultPreviewSize don't throw)
+            try {
+                uvcCameraHelper?.closeCamera()
+                uvcCameraHelper?.release()
+            } catch (_: Throwable) {}
+
+            // Create UVCCameraTextureView programmatically to avoid native lib crash at layout inflation
+            val textureView = com.serenegiant.usb.widget.UVCCameraTextureView(this)
+            textureView.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            binding.uvcPreviewContainer.removeAllViews()
+            binding.uvcPreviewContainer.addView(textureView)
+            uvcTextureView = textureView
+            val cameraView = textureView as com.serenegiant.usb.widget.CameraViewInterface
+
+            uvcCameraHelper = com.jiangdg.usbcamera.UVCCameraHelper.getInstance(1920, 1080)
+            uvcCameraHelper?.setDefaultFrameFormat(com.jiangdg.usbcamera.UVCCameraHelper.FRAME_FORMAT_MJPEG)
+
+            cameraView.setCallback(object : com.serenegiant.usb.widget.CameraViewInterface.Callback {
+                override fun onSurfaceCreated(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface) {
+                    if (!isUvcPreview && uvcCameraHelper?.isCameraOpened == true) {
+                        uvcCameraHelper?.startPreview(cameraView)
+                        isUvcPreview = true
+                    }
+                }
+                override fun onSurfaceChanged(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface, width: Int, height: Int) {}
+                override fun onSurfaceDestroy(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface) {
+                    if (isUvcPreview && uvcCameraHelper?.isCameraOpened == true) {
+                        uvcCameraHelper?.stopPreview()
+                        isUvcPreview = false
+                    }
+                }
+            })
+
+            val devListener = object : com.jiangdg.usbcamera.UVCCameraHelper.OnMyDevConnectListener {
+                override fun onAttachDev(device: android.hardware.usb.UsbDevice) {
+                    runOnUiThread {
+                        binding.usbStatusText.text = "🔌 Dispositivo USB detectado, solicitando permiso..."
+                        uvcCameraHelper?.requestPermission(0)
+                    }
+                }
+                override fun onDettachDev(device: android.hardware.usb.UsbDevice) {
+                    runOnUiThread {
+                        if (isUvcPreview) {
+                            uvcCameraHelper?.closeCamera()
+                            isUvcPreview = false
+                        }
+                        isUvcCameraOpened = false
+                        binding.usbStatusContainer.visibility = View.VISIBLE
+                        binding.usbStatusText.text = "🔌 Cámara USB desconectada"
+                        binding.buttonUsbRetry.visibility = View.VISIBLE
+                        binding.buttonUsbRetry.setOnClickListener { startUvcCamera() }
+                        Toast.makeText(this@CameraActivity, "Cámara USB desconectada", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                override fun onConnectDev(device: android.hardware.usb.UsbDevice, isConnected: Boolean) {
+                    runOnUiThread {
+                        if (isConnected) {
+                            isUvcCameraOpened = true
+                            binding.usbStatusContainer.visibility = View.GONE
+                            Toast.makeText(this@CameraActivity, "📷 Cámara USB conectada (1080p)", Toast.LENGTH_SHORT).show()
+                        } else {
+                            binding.usbStatusContainer.visibility = View.VISIBLE
+                            binding.usbStatusText.text = "⚠️ No se pudo abrir la cámara USB"
+                            binding.buttonUsbRetry.visibility = View.VISIBLE
+                            binding.buttonUsbRetry.setOnClickListener { startUvcCamera() }
+                        }
+                    }
+                }
+                override fun onDisConnectDev(device: android.hardware.usb.UsbDevice) {
+                    runOnUiThread {
+                        isUvcCameraOpened = false
+                    }
+                }
+            }
+
+            uvcCameraHelper?.initUSBMonitor(this, cameraView, devListener)
+            registerUsbMonitorSafe()
+        } catch (e: Throwable) {
+            android.util.Log.e("CameraActivity", "Error initializing UVC camera", e)
+            binding.usbStatusText.text = "⚠️ Error UVC: ${e.message}"
+            binding.buttonUsbRetry.visibility = View.VISIBLE
+            binding.buttonUsbRetry.setOnClickListener { startUvcCamera() }
+            Toast.makeText(this, "Error cámara USB: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Register USBMonitor with FLAG_IMMUTABLE fix for Android 12+ (API 31+).
+     * The AAR's USBMonitor.register() creates PendingIntent with flags=0, which
+     * crashes on Android 12+. This method replicates register() using reflection
+     * but with the correct PendingIntent flags.
+     */
+    private fun registerUsbMonitorSafe() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // Pre-Android 12: standard registration works fine
+            uvcCameraHelper?.registerUSB()
+            return
+        }
+
+        // Android 12+: Need FLAG_IMMUTABLE for PendingIntent
+        val usbMonitor = uvcCameraHelper?.getUSBMonitor()
+            ?: throw IllegalStateException("USBMonitor is null after initUSBMonitor")
+
+        val monitorClass = usbMonitor.javaClass
+
+        // Check if destroyed
+        val destroyedField = monitorClass.getDeclaredField("destroyed")
+        destroyedField.isAccessible = true
+        if (destroyedField.getBoolean(usbMonitor)) {
+            throw IllegalStateException("USBMonitor already destroyed")
+        }
+
+        // Check if already registered
+        val permIntentField = monitorClass.getDeclaredField("mPermissionIntent")
+        permIntentField.isAccessible = true
+        if (permIntentField.get(usbMonitor) != null) return
+
+        // Get context from WeakReference
+        val weakCtxField = monitorClass.getDeclaredField("mWeakContext")
+        weakCtxField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val context = (weakCtxField.get(usbMonitor) as java.lang.ref.WeakReference<android.content.Context>).get()
+            ?: throw IllegalStateException("Context is null")
+
+        // Get ACTION_USB_PERMISSION (instance field unique per USBMonitor)
+        val actionField = monitorClass.getDeclaredField("ACTION_USB_PERMISSION")
+        actionField.isAccessible = true
+        val action = actionField.get(usbMonitor) as String
+
+        // Create PendingIntent with FLAG_IMMUTABLE (the fix)
+        val pendingIntent = android.app.PendingIntent.getBroadcast(
+            context, 0, android.content.Intent(action),
+            android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        permIntentField.set(usbMonitor, pendingIntent)
+
+        // Register broadcast receiver
+        val receiverField = monitorClass.getDeclaredField("mUsbReceiver")
+        receiverField.isAccessible = true
+        val receiver = receiverField.get(usbMonitor) as android.content.BroadcastReceiver
+
+        val filter = android.content.IntentFilter(action)
+        filter.addAction("android.hardware.usb.action.USB_DEVICE_ATTACHED")
+        filter.addAction(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_DETACHED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+
+        // Reset device counts and start periodic device check
+        val deviceCountsField = monitorClass.getDeclaredField("mDeviceCounts")
+        deviceCountsField.isAccessible = true
+        deviceCountsField.setInt(usbMonitor, 0)
+
+        val handlerField = monitorClass.getDeclaredField("mAsyncHandler")
+        handlerField.isAccessible = true
+        val handler = handlerField.get(usbMonitor) as android.os.Handler
+
+        val runnableField = monitorClass.getDeclaredField("mDeviceCheckRunnable")
+        runnableField.isAccessible = true
+        val runnable = runnableField.get(usbMonitor) as Runnable
+
+        handler.postDelayed(runnable, 1000)
+
+        android.util.Log.i("CameraActivity", "USBMonitor registered with FLAG_IMMUTABLE fix")
+    }
+
+    // Auto-detect USB camera when device is plugged in while activity is open
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // UVCCameraHelper handles USB attach/detach via its own USBMonitor
+        // No manual re-init needed here
+    }
+
     private fun startCountdown() {
         binding.countdownText.visibility = View.VISIBLE
         binding.buttonCapture.isEnabled = false
@@ -331,12 +536,12 @@ class CameraActivity : AppCompatActivity() {
                 
                 if (mode == "PHOTO") {
                     if (isPhotoBoothMode) {
-                        takePhotoBoothPhoto()
+                        if (cameraSource == "usb") takeUvcPhotoBoothPhoto() else takePhotoBoothPhoto()
                     } else {
-                        takePhoto()
+                        if (cameraSource == "usb") takeUvcPhoto() else takePhoto()
                     }
                 } else {
-                    startVideoRecording()
+                    if (cameraSource == "usb") startUvcVideoRecording() else startVideoRecording()
                 }
                 
                 binding.buttonCapture.isEnabled = true
@@ -671,8 +876,196 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun stopVideoRecording() {
-        recording?.stop()
+        if (cameraSource == "usb") {
+            stopUvcVideoRecording()
+        } else {
+            recording?.stop()
+        }
         recordingTimer?.cancel()
+    }
+
+    // ============ UVC Camera Capture Methods ============
+
+    private fun takeUvcPhoto() {
+        if (uvcCameraHelper?.isCameraOpened != true) {
+            Toast.makeText(this, "Cámara USB no disponible", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dir = java.io.File(getExternalFilesDir(null), "UVC_Photos")
+        if (!dir.exists()) dir.mkdirs()
+        val photoFile = java.io.File(dir, "UVC_${System.currentTimeMillis()}.jpg")
+
+        uvcCameraHelper?.capturePicture(photoFile.absolutePath,
+            object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnCaptureListener {
+                override fun onCaptureResult(path: String?) {
+                    if (path == null) {
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
+                    var bitmap = BitmapFactory.decodeFile(path) ?: return
+
+                    // Apply effects
+                    if (filterMode != "normal") {
+                        bitmap = applyFilter(bitmap, filterMode)
+                    }
+
+                    if ((backgroundMode != "none" || backgroundPath.isNotEmpty()) && removeBackground) {
+                        processWithBackgroundRemoval(bitmap) { processedBitmap ->
+                            var finalBitmap = processedBitmap
+                            if (frameMode != "none" && framePath.isNotEmpty()) {
+                                finalBitmap = applyFrame(finalBitmap, framePath)
+                            }
+                            if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                                applyFaceFilterToPhoto(finalBitmap) { filteredBitmap ->
+                                    sessionPhotos.add(filteredBitmap)
+                                    savePhotoToGallery(filteredBitmap)
+                                    Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
+                                }
+                            } else {
+                                sessionPhotos.add(finalBitmap)
+                                savePhotoToGallery(finalBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({ showPreview(finalBitmap, null) }, 200)
+                            }
+                        }
+                    } else {
+                        if (frameMode != "none" && framePath.isNotEmpty()) {
+                            bitmap = applyFrame(bitmap, framePath)
+                        }
+                        if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                            applyFaceFilterToPhoto(bitmap) { filteredBitmap ->
+                                sessionPhotos.add(filteredBitmap)
+                                savePhotoToGallery(filteredBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
+                            }
+                        } else {
+                            sessionPhotos.add(bitmap)
+                            savePhotoToGallery(bitmap)
+                            Handler(Looper.getMainLooper()).postDelayed({ showPreview(bitmap, null) }, 200)
+                        }
+                    }
+                    // Clean up temp file
+                    try { java.io.File(path).delete() } catch (_: Exception) {}
+                }
+            })
+    }
+
+    private fun takeUvcPhotoBoothPhoto() {
+        if (uvcCameraHelper?.isCameraOpened != true) {
+            Toast.makeText(this, "Cámara USB no disponible", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dir = java.io.File(getExternalFilesDir(null), "UVC_Photos")
+        if (!dir.exists()) dir.mkdirs()
+        val photoFile = java.io.File(dir, "UVC_booth_${System.currentTimeMillis()}.jpg")
+
+        uvcCameraHelper?.capturePicture(photoFile.absolutePath,
+            object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnCaptureListener {
+                override fun onCaptureResult(path: String?) {
+                    if (path == null) {
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
+                    var bitmap = BitmapFactory.decodeFile(path) ?: return
+
+                    if (filterMode != "normal") {
+                        bitmap = applyFilter(bitmap, filterMode)
+                    }
+                    if (frameMode != "none" && framePath.isNotEmpty()) {
+                        bitmap = applyFrame(bitmap, framePath)
+                    }
+
+                    photoBoothBitmaps.add(bitmap)
+                    currentPhotoBoothCount++
+
+                    runOnUiThread {
+                        if (currentPhotoBoothCount < 4) {
+                            Handler(Looper.getMainLooper()).postDelayed({ startCountdown() }, 3000)
+                        } else {
+                            binding.photoBoothCounter.visibility = View.GONE
+                            val finalBitmap = createPhotoBoothGrid(photoBoothBitmaps)
+                            sessionPhotos.add(finalBitmap)
+                            savePhotoToGallery(finalBitmap)
+                            showPreview(finalBitmap, null)
+                            photoBoothBitmaps.clear()
+                            currentPhotoBoothCount = 0
+                        }
+                    }
+                    try { java.io.File(path).delete() } catch (_: Exception) {}
+                }
+            })
+    }
+
+    private fun startUvcVideoRecording() {
+        if (uvcCameraHelper?.isCameraOpened != true) {
+            Toast.makeText(this, "Cámara USB no disponible", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dir = java.io.File(getExternalFilesDir(null), "UVC_Videos")
+        if (!dir.exists()) dir.mkdirs()
+        val videoFile = java.io.File(dir, "UVC_${System.currentTimeMillis()}.mp4")
+
+        val params = com.serenegiant.usb.encoder.RecordParams().apply {
+            recordPath = videoFile.absolutePath
+            recordDuration = 0 // Manual stop
+            isVoiceClose = false
+        }
+
+        uvcCameraHelper?.startPusher(params, object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnEncodeResultListener {
+            override fun onEncodeResult(data: ByteArray?, offset: Int, length: Int, timestamp: Long, type: Int) {
+                // Encoding in progress - nothing needed here
+            }
+
+            override fun onRecordResult(videoPath: String?) {
+                if (videoPath == null) return
+                runOnUiThread {
+                    val videoFile2 = java.io.File(videoPath)
+                    val uri = android.net.Uri.fromFile(videoFile2)
+
+                    if (removeBackground && backgroundPath.isNotEmpty()) {
+                        launchProcessingActivity(uri)
+                    } else if (slowMotionMode == "boomerang_reverse") {
+                        processBoomerangVideo(uri)
+                    } else if (slowMotionMode != "normal") {
+                        Toast.makeText(this@CameraActivity, "Video guardado", Toast.LENGTH_SHORT).show()
+                        showPreview(null, uri)
+                    } else if (filterMode != "normal" || (frameMode != "none" && framePath.isNotEmpty())) {
+                        Toast.makeText(this@CameraActivity, "Video guardado. Procesando...", Toast.LENGTH_SHORT).show()
+                        processVideoWithFilterAndFrame(uri)
+                    } else {
+                        Toast.makeText(this@CameraActivity, "Video guardado", Toast.LENGTH_SHORT).show()
+                        showPreview(null, uri)
+                    }
+                }
+            }
+        })
+
+        // UVC recording started - show indicator and countdown
+        binding.recordingIndicator.visibility = View.VISIBLE
+        binding.countdownText.visibility = View.VISIBLE
+        binding.buttonCapture.text = "⏹️"
+        val startTime = System.currentTimeMillis()
+        var elapsedSeconds = 0
+        binding.countdownText.text = "$elapsedSeconds/$videoDuration"
+
+        recordingTimer = object : CountDownTimer((videoDuration * 1000).toLong(), 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                elapsedSeconds = ((System.currentTimeMillis() - startTime) / 1000).toInt()
+                binding.countdownText.text = "$elapsedSeconds/$videoDuration"
+            }
+            override fun onFinish() {
+                stopUvcVideoRecording()
+            }
+        }
+        recordingTimer?.start()
+    }
+
+    private fun stopUvcVideoRecording() {
+        uvcCameraHelper?.stopPusher()
+        binding.recordingIndicator.visibility = View.GONE
+        binding.countdownText.visibility = View.GONE
+        binding.buttonCapture.text = "🎥"
+        recordingTimer?.cancel()
+        recordingTimer = null
     }
 
     private fun imageProxyToBitmap(image: androidx.camera.core.ImageProxy): Bitmap {
@@ -2309,7 +2702,7 @@ class CameraActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
-                startCamera()
+                if (cameraSource == "usb") startUvcCamera() else startCamera()
             } else {
                 Toast.makeText(this, "Permisos no concedidos", Toast.LENGTH_SHORT).show()
                 finish()
@@ -2320,6 +2713,11 @@ class CameraActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
+        // Clean up UVC camera
+        if (cameraSource == "usb") {
+            uvcCameraHelper?.closeCamera()
+            uvcCameraHelper?.release()
+        }
     }
 
     companion object {

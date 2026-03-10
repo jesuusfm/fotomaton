@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- UVC video class devices (webcams, DJI Osmo Pocket 3 in webcam mode, etc.) -->
+    <usb-device class="239" subclass="2" />
+    <!-- DJI-specific USB vendor ID -->
+    <usb-device vendor-id="11427" />
+</resources>

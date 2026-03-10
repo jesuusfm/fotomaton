@@ -70,4 +70,8 @@ dependencies {
     
     // ML Kit Face Detection for face filters (mustaches, hats, masks)
     implementation("com.google.mlkit:face-detection:16.1.5")
+
+    // USB Camera (UVC) support for external cameras (e.g. DJI Osmo Pocket 3)
+    implementation(files("libs/AndroidUSBCamera-2.3.8.aar"))
+    implementation(files("libs/libusbcommon_v4.1.1.aar"))
 }

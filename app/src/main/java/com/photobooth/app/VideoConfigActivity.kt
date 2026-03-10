@@ -27,6 +27,7 @@ class VideoConfigActivity : AppCompatActivity() {
     private var backgroundMode = "none"
     private var backgroundPath = ""
     private var removeBackground = false
+    private var cameraSource = "phone" // "phone" or "usb"
     
     // Frame preview launcher
     private val framePreviewLauncher = registerForActivityResult(
@@ -128,6 +129,11 @@ class VideoConfigActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        // Camera source selector
+        binding.chipGroupCameraSource.setOnCheckedStateChangeListener { _, checkedIds ->
+            cameraSource = if (checkedIds.contains(R.id.chip_usb_camera)) "usb" else "phone"
+        }
 
         // Slow motion mode selection
         binding.radioGroupSlowMotion.setOnCheckedChangeListener { _, checkedId ->
@@ -237,6 +243,7 @@ class VideoConfigActivity : AppCompatActivity() {
             intent.putExtra("BACKGROUND", backgroundMode)
             intent.putExtra("BACKGROUND_PATH", backgroundPath)
             intent.putExtra("REMOVE_BG", removeBackground)
+            intent.putExtra("CAMERA_SOURCE", cameraSource)
             startActivity(intent)
         }
     }
