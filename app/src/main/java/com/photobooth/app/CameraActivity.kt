@@ -356,6 +356,12 @@ class CameraActivity : AppCompatActivity() {
                 override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
                     var bitmap = imageProxyToBitmap(image)
                     image.close()
+
+                    // Mirror front camera to match what user saw in preview
+                    if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA) {
+                        val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
+                        bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+                    }
                     
                     // Apply effects in order: filter -> background -> frame -> face filter
                     if (filterMode != "normal") {
@@ -502,11 +508,17 @@ class CameraActivity : AppCompatActivity() {
                 override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
                     var bitmap = imageProxyToBitmap(image)
                     image.close()
+
+                    // Mirror front camera to match what user saw in preview
+                    if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA) {
+                        val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
+                        bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+                    }
                     
                     if (filterMode != "normal") {
                         bitmap = applyFilter(bitmap, filterMode)
                     }
-                    
+
                     // For photo booth, we don't apply background removal (too slow for 4 photos)
                     // But we can apply frames
                     if (frameMode != "none" && framePath.isNotEmpty()) {
@@ -796,7 +808,7 @@ class CameraActivity : AppCompatActivity() {
         val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
             contentResolver.openOutputStream(it)?.use { outputStream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
             }
         }
         
@@ -819,7 +831,7 @@ class CameraActivity : AppCompatActivity() {
                 try {
                     val tempFile = File(cacheDir, "preview_${System.currentTimeMillis()}.jpg")
                     tempFile.outputStream().use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
                     }
                     intent.putExtra("IMAGE_PATH", tempFile.absolutePath)
                     intent.putExtra("TYPE", "PHOTO")
@@ -1639,7 +1651,7 @@ class CameraActivity : AppCompatActivity() {
                     composeCommand += "-vf \"$videoFilter\" "
                 }
                 
-                composeCommand += "-c:v mpeg4 -pix_fmt yuv420p -c:a copy -q:v 5 -b:v 8M \"${outputFile.absolutePath}\""
+                composeCommand += "-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"${outputFile.absolutePath}\""
                 
                 android.util.Log.d("VideoBackground", "Composing video: $composeCommand")
                 val composeSession = FFmpegKit.execute(composeCommand)
@@ -1884,10 +1896,10 @@ class CameraActivity : AppCompatActivity() {
                         "cold" -> "colorbalance=bs=-0.2:ms=-0.1:hs=0.1"
                         else -> "null"
                     }
-                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[0:v]$videoFilter[filtered];[1:v]scale=iw:ih[scaled];[filtered][scaled]overlay=0:0\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
+                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[0:v]$videoFilter[filtered];[1:v]scale=iw:ih[scaled];[filtered][scaled]overlay=0:0\" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else if (frameFile != null) {
                     // Only frame overlay - scale frame to match video size exactly
-                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[1:v]scale2ref[frame][video];[video][frame]overlay=0:0\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
+                    "-y -i \"$inputPath\" -i \"${frameFile.absolutePath}\" -filter_complex \"[1:v]scale2ref[frame][video];[video][frame]overlay=0:0\" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else if (filterMode != "normal") {
                     // Only filter
                     val videoFilter = when (filterMode) {
@@ -1899,7 +1911,7 @@ class CameraActivity : AppCompatActivity() {
                         "cold" -> "colorbalance=bs=-0.2:ms=-0.1:hs=0.1"
                         else -> "null"
                     }
-                    "-y -i \"$inputPath\" -vf \"$videoFilter\" -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a copy \"$outputPath\""
+                    "-y -i \"$inputPath\" -vf \"$videoFilter\" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"$outputPath\""
                 } else {
                     // No processing needed (shouldn't happen)
                     "-y -i \"$inputPath\" -c copy \"$outputPath\""
