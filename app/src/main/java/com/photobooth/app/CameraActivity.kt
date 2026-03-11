@@ -361,6 +361,8 @@ class CameraActivity : AppCompatActivity() {
                         uvcCameraHelper?.startPreview(cameraView)
                         isUvcPreview = true
                     }
+                    // Apply centerCrop so the preview fills the screen without distortion
+                    applyCenterCropTransform()
                 }
                 override fun onSurfaceDestroy(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface) {
                     android.util.Log.d("CameraActivity", "UVC onSurfaceDestroy")
@@ -404,18 +406,23 @@ class CameraActivity : AppCompatActivity() {
                             val actualW = uvcCameraHelper?.previewWidth ?: 0
                             val actualH = uvcCameraHelper?.previewHeight ?: 0
                             Toast.makeText(this@CameraActivity, "📷 USB conectada (${actualW}x${actualH})", Toast.LENGTH_SHORT).show()
-                            // Safety net: ensure preview starts even if the library's internal
-                            // 500ms auto-start races with setAspectRatio relayout.
-                            // Stop+start after 1.5s guarantees the surface texture is current.
+                            // Disable the library's aspect ratio constraint so the
+                            // TextureView fills its MATCH_PARENT container.
+                            // Setting 0.0 makes onMeasure skip the constraint.
+                            uvcTextureView?.setAspectRatio(0.0)
+                            // Safety net: ensure preview starts, aspect ratio stays disabled,
+                            // and centerCrop transform is applied after layout settles.
                             Handler(Looper.getMainLooper()).postDelayed({
                                 if (uvcCameraHelper?.isCameraOpened == true) {
                                     android.util.Log.d("CameraActivity", "UVC safety-net: restarting preview")
+                                    uvcTextureView?.setAspectRatio(0.0)
                                     uvcCameraHelper?.stopPreview()
                                     isUvcPreview = false
                                     uvcTextureView?.let { tv ->
                                         uvcCameraHelper?.startPreview(tv as com.serenegiant.usb.widget.CameraViewInterface)
                                         isUvcPreview = true
                                     }
+                                    applyCenterCropTransform()
                                 }
                             }, 1500)
                         } else {
@@ -1048,7 +1055,8 @@ class CameraActivity : AppCompatActivity() {
         }
         val dir = java.io.File(getExternalFilesDir(null), "UVC_Videos")
         if (!dir.exists()) dir.mkdirs()
-        val videoFile = java.io.File(dir, "UVC_${System.currentTimeMillis()}.mp4")
+        // Library appends ".mp4" internally, so do NOT include the extension here
+        val videoFile = java.io.File(dir, "UVC_${System.currentTimeMillis()}")
 
         val params = com.serenegiant.usb.encoder.RecordParams().apply {
             recordPath = videoFile.absolutePath
@@ -1067,6 +1075,15 @@ class CameraActivity : AppCompatActivity() {
                     return
                 }
                 android.util.Log.i("CameraActivity", "UVC recording done: $videoPath (size=${java.io.File(videoPath).length()})")
+                // The library appends .mp4 to the path; verify the file exists
+                val actualFile = java.io.File(videoPath)
+                if (!actualFile.exists()) {
+                    // Try without double extension in case path already had .mp4
+                    android.util.Log.e("CameraActivity", "UVC video file not found at: $videoPath")
+                    runOnUiThread { Toast.makeText(this@CameraActivity, "Error: archivo de video no encontrado", Toast.LENGTH_SHORT).show() }
+                    return
+                }
+                android.util.Log.i("CameraActivity", "UVC video file confirmed: ${actualFile.length()} bytes")
                 // Save UVC video to MediaStore gallery so it can be shared
                 saveUvcVideoToGallery(videoPath) { galleryUri ->
                     if (galleryUri == null) {
@@ -1126,7 +1143,9 @@ class CameraActivity : AppCompatActivity() {
         Thread {
             try {
                 val srcFile = java.io.File(videoPath)
+                android.util.Log.i("CameraActivity", "saveUvcVideoToGallery: path=$videoPath, exists=${srcFile.exists()}, size=${srcFile.length()}")
                 if (!srcFile.exists() || srcFile.length() == 0L) {
+                    android.util.Log.e("CameraActivity", "UVC video file missing or empty: $videoPath")
                     runOnUiThread { callback(null) }
                     return@Thread
                 }
@@ -1153,6 +1172,36 @@ class CameraActivity : AppCompatActivity() {
                 runOnUiThread { callback(null) }
             }
         }.start()
+    }
+
+    /**
+     * Apply a centerCrop-style matrix to the UVC TextureView so the preview
+     * fills the screen without distortion. This is display-only and does NOT
+     * affect captured photos or videos (those come from raw UVC frames).
+     */
+    private fun applyCenterCropTransform() {
+        val tv = uvcTextureView ?: return
+        val viewWidth = tv.width.toFloat()
+        val viewHeight = tv.height.toFloat()
+        if (viewWidth <= 0 || viewHeight <= 0) return
+
+        val bufferWidth = (uvcCameraHelper?.previewWidth ?: 1920).toFloat()
+        val bufferHeight = (uvcCameraHelper?.previewHeight ?: 1080).toFloat()
+
+        // Without transform, the buffer is stretched non-uniformly to fill the view.
+        // CenterCrop: scale uniformly so the buffer fills the view, cropping overflow.
+        val scaleRatioX = viewWidth / bufferWidth
+        val scaleRatioY = viewHeight / bufferHeight
+        val maxScale = maxOf(scaleRatioX, scaleRatioY)
+
+        // Transform compensates for the non-uniform stretch
+        val scaleX = maxScale / scaleRatioX
+        val scaleY = maxScale / scaleRatioY
+
+        val matrix = android.graphics.Matrix()
+        matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
+        tv.setTransform(matrix)
+        android.util.Log.d("CameraActivity", "CenterCrop: scaleX=$scaleX, scaleY=$scaleY, view=${viewWidth}x${viewHeight}, buffer=${bufferWidth}x${bufferHeight}")
     }
 
     /** Force audio output to phone speaker when USB device hijacks audio routing */
@@ -2830,16 +2879,6 @@ class CameraActivity : AppCompatActivity() {
                 finish()
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        uvcTextureView?.onResume()
-    }
-
-    override fun onPause() {
-        uvcTextureView?.onPause()
-        super.onPause()
     }
 
     override fun onDestroy() {
