@@ -104,7 +104,6 @@ class CameraActivity : AppCompatActivity() {
 
     // Gallery for current session
     private val sessionPhotos = mutableListOf<Bitmap>()
-    private val sessionMediaUris = mutableListOf<Pair<String, String>>() // (uriString, "PHOTO"/"VIDEO")
     
     // Processing activity launcher
     private val processingLauncher = registerForActivityResult(
@@ -346,13 +345,25 @@ class CameraActivity : AppCompatActivity() {
 
             cameraView.setCallback(object : com.serenegiant.usb.widget.CameraViewInterface.Callback {
                 override fun onSurfaceCreated(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface) {
+                    android.util.Log.d("CameraActivity", "UVC onSurfaceCreated, cameraOpened=${uvcCameraHelper?.isCameraOpened}, isUvcPreview=$isUvcPreview")
                     if (!isUvcPreview && uvcCameraHelper?.isCameraOpened == true) {
                         uvcCameraHelper?.startPreview(cameraView)
                         isUvcPreview = true
                     }
                 }
-                override fun onSurfaceChanged(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface, width: Int, height: Int) {}
+                override fun onSurfaceChanged(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface, width: Int, height: Int) {
+                    android.util.Log.d("CameraActivity", "UVC onSurfaceChanged ${width}x${height}, cameraOpened=${uvcCameraHelper?.isCameraOpened}")
+                    // Surface texture may have changed (e.g. after setAspectRatio relayout);
+                    // restart preview so camera writes to the new texture
+                    if (uvcCameraHelper?.isCameraOpened == true) {
+                        uvcCameraHelper?.stopPreview()
+                        isUvcPreview = false
+                        uvcCameraHelper?.startPreview(cameraView)
+                        isUvcPreview = true
+                    }
+                }
                 override fun onSurfaceDestroy(view: com.serenegiant.usb.widget.CameraViewInterface, surface: android.view.Surface) {
+                    android.util.Log.d("CameraActivity", "UVC onSurfaceDestroy")
                     if (isUvcPreview && uvcCameraHelper?.isCameraOpened == true) {
                         uvcCameraHelper?.stopPreview()
                         isUvcPreview = false
@@ -385,9 +396,6 @@ class CameraActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (isConnected) {
                             isUvcCameraOpened = true
-                            isUvcPreview = true // Library starts preview internally after 500ms
-                            // Re-apply fill-parent aspect ratio (library may re-set integer-division value)
-                            (uvcTextureView as? com.serenegiant.usb.widget.CameraViewInterface)?.setAspectRatio(0.0)
                             binding.usbStatusContainer.visibility = View.GONE
                             // Log supported sizes for debugging
                             val sizes = uvcCameraHelper?.getSupportedPreviewSizes()
@@ -396,6 +404,20 @@ class CameraActivity : AppCompatActivity() {
                             val actualW = uvcCameraHelper?.previewWidth ?: 0
                             val actualH = uvcCameraHelper?.previewHeight ?: 0
                             Toast.makeText(this@CameraActivity, "📷 USB conectada (${actualW}x${actualH})", Toast.LENGTH_SHORT).show()
+                            // Safety net: ensure preview starts even if the library's internal
+                            // 500ms auto-start races with setAspectRatio relayout.
+                            // Stop+start after 1.5s guarantees the surface texture is current.
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                if (uvcCameraHelper?.isCameraOpened == true) {
+                                    android.util.Log.d("CameraActivity", "UVC safety-net: restarting preview")
+                                    uvcCameraHelper?.stopPreview()
+                                    isUvcPreview = false
+                                    uvcTextureView?.let { tv ->
+                                        uvcCameraHelper?.startPreview(tv as com.serenegiant.usb.widget.CameraViewInterface)
+                                        isUvcPreview = true
+                                    }
+                                }
+                            }, 1500)
                         } else {
                             binding.usbStatusContainer.visibility = View.VISIBLE
                             binding.usbStatusText.text = "⚠️ No se pudo abrir la cámara USB"
@@ -412,9 +434,6 @@ class CameraActivity : AppCompatActivity() {
             }
 
             uvcCameraHelper?.initUSBMonitor(this, cameraView, devListener)
-            // Override the library's integer-division aspect ratio (1920/1080=1 → square)
-            // so the TextureView fills its parent container
-            cameraView.setAspectRatio(0.0)
             registerUsbMonitorSafe()
 
             // Force audio to phone speaker (DJI USB hijacks audio output)
@@ -908,52 +927,67 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "Cámara USB no disponible", Toast.LENGTH_SHORT).show()
             return
         }
-        // Grab frame directly from TextureView — preview stays alive
-        val rawBitmap = uvcTextureView?.bitmap
-        if (rawBitmap == null) {
-            Toast.makeText(this, "Error: no hay frame disponible", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Thread {
-            var bitmap = rawBitmap
-            if (filterMode != "normal") {
-                bitmap = applyFilter(bitmap, filterMode)
-            }
-            if ((backgroundMode != "none" || backgroundPath.isNotEmpty()) && removeBackground) {
-                processWithBackgroundRemoval(bitmap) { processedBitmap ->
-                    var finalBitmap = processedBitmap
-                    if (frameMode != "none" && framePath.isNotEmpty()) {
-                        finalBitmap = applyFrame(finalBitmap, framePath)
+        val dir = java.io.File(getExternalFilesDir(null), "UVC_Photos")
+        if (!dir.exists()) dir.mkdirs()
+        val photoFile = java.io.File(dir, "UVC_${System.currentTimeMillis()}.jpg")
+
+        uvcCameraHelper?.capturePicture(photoFile.absolutePath,
+            object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnCaptureListener {
+                override fun onCaptureResult(path: String?) {
+                    if (path == null) {
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
+                        return
                     }
-                    if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
-                        applyFaceFilterToPhoto(finalBitmap) { filteredBitmap ->
-                            sessionPhotos.add(filteredBitmap)
-                            savePhotoToGallery(filteredBitmap)
-                            Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
+                    var bitmap = BitmapFactory.decodeFile(path)
+                    if (bitmap == null) {
+                        android.util.Log.e("CameraActivity", "UVC photo decode failed for: $path (size=${java.io.File(path).length()})")
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error: foto capturada vacía", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
+
+                    // Apply effects
+                    if (filterMode != "normal") {
+                        bitmap = applyFilter(bitmap, filterMode)
+                    }
+
+                    if ((backgroundMode != "none" || backgroundPath.isNotEmpty()) && removeBackground) {
+                        processWithBackgroundRemoval(bitmap) { processedBitmap ->
+                            var finalBitmap = processedBitmap
+                            if (frameMode != "none" && framePath.isNotEmpty()) {
+                                finalBitmap = applyFrame(finalBitmap, framePath)
+                            }
+                            if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                                applyFaceFilterToPhoto(finalBitmap) { filteredBitmap ->
+                                    sessionPhotos.add(filteredBitmap)
+                                    savePhotoToGallery(filteredBitmap)
+                                    Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
+                                }
+                            } else {
+                                sessionPhotos.add(finalBitmap)
+                                savePhotoToGallery(finalBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({ showPreview(finalBitmap, null) }, 200)
+                            }
                         }
                     } else {
-                        sessionPhotos.add(finalBitmap)
-                        savePhotoToGallery(finalBitmap)
-                        Handler(Looper.getMainLooper()).postDelayed({ showPreview(finalBitmap, null) }, 200)
+                        if (frameMode != "none" && framePath.isNotEmpty()) {
+                            bitmap = applyFrame(bitmap, framePath)
+                        }
+                        if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
+                            applyFaceFilterToPhoto(bitmap) { filteredBitmap ->
+                                sessionPhotos.add(filteredBitmap)
+                                savePhotoToGallery(filteredBitmap)
+                                Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
+                            }
+                        } else {
+                            sessionPhotos.add(bitmap)
+                            savePhotoToGallery(bitmap)
+                            Handler(Looper.getMainLooper()).postDelayed({ showPreview(bitmap, null) }, 200)
+                        }
                     }
+                    // Clean up temp file
+                    try { java.io.File(path).delete() } catch (_: Exception) {}
                 }
-            } else {
-                if (frameMode != "none" && framePath.isNotEmpty()) {
-                    bitmap = applyFrame(bitmap, framePath)
-                }
-                if (faceFilterType != "none" && faceFilterPath.isNotEmpty()) {
-                    applyFaceFilterToPhoto(bitmap) { filteredBitmap ->
-                        sessionPhotos.add(filteredBitmap)
-                        savePhotoToGallery(filteredBitmap)
-                        Handler(Looper.getMainLooper()).postDelayed({ showPreview(filteredBitmap, null) }, 200)
-                    }
-                } else {
-                    sessionPhotos.add(bitmap)
-                    savePhotoToGallery(bitmap)
-                    Handler(Looper.getMainLooper()).postDelayed({ showPreview(bitmap, null) }, 200)
-                }
-            }
-        }.start()
+            })
     }
 
     private fun takeUvcPhotoBoothPhoto() {
@@ -961,35 +995,50 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "Cámara USB no disponible", Toast.LENGTH_SHORT).show()
             return
         }
-        val rawBitmap = uvcTextureView?.bitmap
-        if (rawBitmap == null) {
-            Toast.makeText(this, "Error: no hay frame disponible", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Thread {
-            var bitmap = rawBitmap
-            if (filterMode != "normal") {
-                bitmap = applyFilter(bitmap, filterMode)
-            }
-            if (frameMode != "none" && framePath.isNotEmpty()) {
-                bitmap = applyFrame(bitmap, framePath)
-            }
-            photoBoothBitmaps.add(bitmap)
-            currentPhotoBoothCount++
-            runOnUiThread {
-                if (currentPhotoBoothCount < 4) {
-                    Handler(Looper.getMainLooper()).postDelayed({ startCountdown() }, 3000)
-                } else {
-                    binding.photoBoothCounter.visibility = View.GONE
-                    val finalBitmap = createPhotoBoothGrid(photoBoothBitmaps)
-                    sessionPhotos.add(finalBitmap)
-                    savePhotoToGallery(finalBitmap)
-                    showPreview(finalBitmap, null)
-                    photoBoothBitmaps.clear()
-                    currentPhotoBoothCount = 0
+        val dir = java.io.File(getExternalFilesDir(null), "UVC_Photos")
+        if (!dir.exists()) dir.mkdirs()
+        val photoFile = java.io.File(dir, "UVC_booth_${System.currentTimeMillis()}.jpg")
+
+        uvcCameraHelper?.capturePicture(photoFile.absolutePath,
+            object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnCaptureListener {
+                override fun onCaptureResult(path: String?) {
+                    if (path == null) {
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
+                    var bitmap = BitmapFactory.decodeFile(path)
+                    if (bitmap == null) {
+                        android.util.Log.e("CameraActivity", "UVC booth photo decode failed for: $path")
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error: foto capturada vacía", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
+
+                    if (filterMode != "normal") {
+                        bitmap = applyFilter(bitmap, filterMode)
+                    }
+                    if (frameMode != "none" && framePath.isNotEmpty()) {
+                        bitmap = applyFrame(bitmap, framePath)
+                    }
+
+                    photoBoothBitmaps.add(bitmap)
+                    currentPhotoBoothCount++
+
+                    runOnUiThread {
+                        if (currentPhotoBoothCount < 4) {
+                            Handler(Looper.getMainLooper()).postDelayed({ startCountdown() }, 3000)
+                        } else {
+                            binding.photoBoothCounter.visibility = View.GONE
+                            val finalBitmap = createPhotoBoothGrid(photoBoothBitmaps)
+                            sessionPhotos.add(finalBitmap)
+                            savePhotoToGallery(finalBitmap)
+                            showPreview(finalBitmap, null)
+                            photoBoothBitmaps.clear()
+                            currentPhotoBoothCount = 0
+                        }
+                    }
+                    try { java.io.File(path).delete() } catch (_: Exception) {}
                 }
-            }
-        }.start()
+            })
     }
 
     private fun startUvcVideoRecording() {
@@ -1276,17 +1325,14 @@ class CameraActivity : AppCompatActivity() {
             contentResolver.openOutputStream(it)?.use { outputStream ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
             }
-            lastSavedPhotoUri = it
-            runOnUiThread { sessionMediaUris.add(it.toString() to "PHOTO") }
         }
+        
+        // Return the URI so we can use it for sharing
+        lastSavedPhotoUri = uri
     }
 
     private fun showPreview(bitmap: Bitmap?, videoUri: Uri?) {
         android.util.Log.d("CameraActivity", "showPreview called - bitmap: ${bitmap != null}, videoUri: $videoUri")
-        // Track video URIs for the session gallery
-        if (videoUri != null && sessionMediaUris.none { it.first == videoUri.toString() }) {
-            sessionMediaUris.add(videoUri.toString() to "VIDEO")
-        }
         
         val intent = Intent(this, PreviewActivity::class.java)
         
@@ -2740,14 +2786,22 @@ class CameraActivity : AppCompatActivity() {
     }
     
     private fun showGallery() {
-        if (sessionMediaUris.isEmpty()) {
-            Toast.makeText(this, "No hay fotos o videos en esta sesión", Toast.LENGTH_SHORT).show()
+        if (sessionPhotos.isEmpty()) {
+            Toast.makeText(this, "No hay fotos en esta sesión", Toast.LENGTH_SHORT).show()
             return
         }
+        
         val intent = Intent(this, GalleryActivity::class.java)
-        intent.putExtra("MEDIA_URIS", sessionMediaUris.map { it.first }.toTypedArray())
-        intent.putExtra("MEDIA_TYPES", sessionMediaUris.map { it.second }.toTypedArray())
-        intent.putExtra("EVENT_NAME", eventName)
+        // Convert bitmaps to byte arrays
+        val byteArrays = sessionPhotos.map { bitmap ->
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.toByteArray()
+        }
+        intent.putExtra("PHOTO_COUNT", byteArrays.size)
+        byteArrays.forEachIndexed { index, bytes ->
+            intent.putExtra("PHOTO_$index", bytes)
+        }
         startActivity(intent)
     }
 
@@ -2778,6 +2832,16 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        uvcTextureView?.onResume()
+    }
+
+    override fun onPause() {
+        uvcTextureView?.onPause()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
@@ -2786,19 +2850,6 @@ class CameraActivity : AppCompatActivity() {
             uvcCameraHelper?.closeCamera()
             uvcCameraHelper?.release()
             restoreAudioRouting()
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Restart UVC preview when returning from PreviewActivity/GalleryActivity
-        if (cameraSource == "usb" && isUvcCameraOpened && !isUvcPreview) {
-            val cameraView = uvcTextureView as? com.serenegiant.usb.widget.CameraViewInterface
-            if (cameraView != null) {
-                uvcCameraHelper?.startPreview(cameraView)
-                isUvcPreview = true
-                android.util.Log.i("CameraActivity", "UVC preview restarted in onResume")
-            }
         }
     }
 

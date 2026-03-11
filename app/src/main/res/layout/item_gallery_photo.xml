@@ -12,18 +12,4 @@
         android:layout_height="match_parent"
         android:scaleType="centerCrop" />
 
-    <!-- Video badge shown over video thumbnails -->
-    <TextView
-        android:id="@+id/video_badge"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:text="▶"
-        android:textSize="36sp"
-        android:textColor="#FFFFFF"
-        android:background="#80000000"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:visibility="gone" />
-
 </androidx.cardview.widget.CardView>
