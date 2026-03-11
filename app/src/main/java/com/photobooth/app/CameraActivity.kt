@@ -339,6 +339,7 @@ class CameraActivity : AppCompatActivity() {
             uvcTextureView = textureView
             val cameraView = textureView as com.serenegiant.usb.widget.CameraViewInterface
 
+            // DJI Osmo Pocket 3 outputs 1080p over UVC (4K is internal only)
             uvcCameraHelper = com.jiangdg.usbcamera.UVCCameraHelper.getInstance(1920, 1080)
             uvcCameraHelper?.setDefaultFrameFormat(com.jiangdg.usbcamera.UVCCameraHelper.FRAME_FORMAT_MJPEG)
 
@@ -384,7 +385,13 @@ class CameraActivity : AppCompatActivity() {
                         if (isConnected) {
                             isUvcCameraOpened = true
                             binding.usbStatusContainer.visibility = View.GONE
-                            Toast.makeText(this@CameraActivity, "📷 Cámara USB conectada (1080p)", Toast.LENGTH_SHORT).show()
+                            // Log supported sizes for debugging
+                            val sizes = uvcCameraHelper?.getSupportedPreviewSizes()
+                            val sizeStr = sizes?.joinToString(", ") { "${it.width}x${it.height}" } ?: "unknown"
+                            android.util.Log.i("CameraActivity", "UVC supported sizes: $sizeStr")
+                            val actualW = uvcCameraHelper?.previewWidth ?: 0
+                            val actualH = uvcCameraHelper?.previewHeight ?: 0
+                            Toast.makeText(this@CameraActivity, "📷 USB conectada (${actualW}x${actualH})", Toast.LENGTH_SHORT).show()
                         } else {
                             binding.usbStatusContainer.visibility = View.VISIBLE
                             binding.usbStatusText.text = "⚠️ No se pudo abrir la cámara USB"
@@ -402,6 +409,9 @@ class CameraActivity : AppCompatActivity() {
 
             uvcCameraHelper?.initUSBMonitor(this, cameraView, devListener)
             registerUsbMonitorSafe()
+
+            // Force audio to phone speaker (DJI USB hijacks audio output)
+            forceAudioToSpeaker()
         } catch (e: Throwable) {
             android.util.Log.e("CameraActivity", "Error initializing UVC camera", e)
             binding.usbStatusText.text = "⚠️ Error UVC: ${e.message}"
@@ -902,7 +912,12 @@ class CameraActivity : AppCompatActivity() {
                         runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
                         return
                     }
-                    var bitmap = BitmapFactory.decodeFile(path) ?: return
+                    var bitmap = BitmapFactory.decodeFile(path)
+                    if (bitmap == null) {
+                        android.util.Log.e("CameraActivity", "UVC photo decode failed for: $path (size=${java.io.File(path).length()})")
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error: foto capturada vacía", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
 
                     // Apply effects
                     if (filterMode != "normal") {
@@ -965,7 +980,12 @@ class CameraActivity : AppCompatActivity() {
                         runOnUiThread { Toast.makeText(this@CameraActivity, "Error capturando foto USB", Toast.LENGTH_SHORT).show() }
                         return
                     }
-                    var bitmap = BitmapFactory.decodeFile(path) ?: return
+                    var bitmap = BitmapFactory.decodeFile(path)
+                    if (bitmap == null) {
+                        android.util.Log.e("CameraActivity", "UVC booth photo decode failed for: $path")
+                        runOnUiThread { Toast.makeText(this@CameraActivity, "Error: foto capturada vacía", Toast.LENGTH_SHORT).show() }
+                        return
+                    }
 
                     if (filterMode != "normal") {
                         bitmap = applyFilter(bitmap, filterMode)
@@ -1016,11 +1036,18 @@ class CameraActivity : AppCompatActivity() {
             }
 
             override fun onRecordResult(videoPath: String?) {
-                if (videoPath == null) return
-                runOnUiThread {
-                    val videoFile2 = java.io.File(videoPath)
-                    val uri = android.net.Uri.fromFile(videoFile2)
-
+                if (videoPath == null) {
+                    runOnUiThread { Toast.makeText(this@CameraActivity, "Error: grabación no produjo archivo", Toast.LENGTH_SHORT).show() }
+                    return
+                }
+                android.util.Log.i("CameraActivity", "UVC recording done: $videoPath (size=${java.io.File(videoPath).length()})")
+                // Save UVC video to MediaStore gallery so it can be shared
+                saveUvcVideoToGallery(videoPath) { galleryUri ->
+                    if (galleryUri == null) {
+                        Toast.makeText(this@CameraActivity, "Error: no se pudo guardar el video", Toast.LENGTH_SHORT).show()
+                        return@saveUvcVideoToGallery
+                    }
+                    val uri = galleryUri
                     if (removeBackground && backgroundPath.isNotEmpty()) {
                         launchProcessingActivity(uri)
                     } else if (slowMotionMode == "boomerang_reverse") {
@@ -1066,6 +1093,75 @@ class CameraActivity : AppCompatActivity() {
         binding.buttonCapture.text = "🎥"
         recordingTimer?.cancel()
         recordingTimer = null
+    }
+
+    /** Save a UVC video file to the MediaStore gallery (so it's shareable) */
+    private fun saveUvcVideoToGallery(videoPath: String, callback: (Uri?) -> Unit) {
+        Thread {
+            try {
+                val srcFile = java.io.File(videoPath)
+                if (!srcFile.exists() || srcFile.length() == 0L) {
+                    runOnUiThread { callback(null) }
+                    return@Thread
+                }
+                val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/PhotoBooth/$eventName")
+                    }
+                }
+                val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        srcFile.inputStream().use { inp -> inp.copyTo(out) }
+                    }
+                    android.util.Log.i("CameraActivity", "UVC video saved to gallery: $uri")
+                }
+                // Clean up temp file
+                try { srcFile.delete() } catch (_: Exception) {}
+                runOnUiThread { callback(uri) }
+            } catch (e: Exception) {
+                android.util.Log.e("CameraActivity", "Error saving UVC video to gallery", e)
+                runOnUiThread { callback(null) }
+            }
+        }.start()
+    }
+
+    /** Force audio output to phone speaker when USB device hijacks audio routing */
+    private fun forceAudioToSpeaker() {
+        try {
+            val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            // Set per-track routing for our beeps
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val speaker = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+                    .find { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                ToneGenerator.preferredOutputDevice = speaker
+                // Also set global communication routing to speaker
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    speaker?.let { audioManager.setCommunicationDevice(it) }
+                }
+            }
+            @Suppress("DEPRECATION")
+            audioManager.isSpeakerphoneOn = true
+            android.util.Log.i("CameraActivity", "Audio forced to phone speaker")
+        } catch (e: Exception) {
+            android.util.Log.w("CameraActivity", "Could not force audio to speaker", e)
+        }
+    }
+
+    /** Restore default audio routing */
+    private fun restoreAudioRouting() {
+        try {
+            val audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            ToneGenerator.preferredOutputDevice = null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioManager.clearCommunicationDevice()
+            }
+            @Suppress("DEPRECATION")
+            audioManager.isSpeakerphoneOn = false
+        } catch (_: Exception) {}
     }
 
     private fun imageProxyToBitmap(image: androidx.camera.core.ImageProxy): Bitmap {
@@ -2717,6 +2813,7 @@ class CameraActivity : AppCompatActivity() {
         if (cameraSource == "usb") {
             uvcCameraHelper?.closeCamera()
             uvcCameraHelper?.release()
+            restoreAudioRouting()
         }
     }
 

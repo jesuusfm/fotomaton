@@ -9,6 +9,10 @@ object ToneGenerator {
     private const val SAMPLE_RATE = 44100
     private const val DURATION_MS = 200 // Short beep
 
+    // When set, forces audio output to this device (e.g. built-in speaker when USB audio is connected)
+    @Volatile
+    var preferredOutputDevice: android.media.AudioDeviceInfo? = null
+
     fun playBeep(frequencyHz: Int) {
         Thread {
             val numSamples = (DURATION_MS * SAMPLE_RATE / 1000)
@@ -38,6 +42,11 @@ object ToneGenerator {
                 .setBufferSizeInBytes(numSamples * 2)
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
+
+            // Route audio to preferred device (e.g. speaker instead of USB audio)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                preferredOutputDevice?.let { audioTrack.setPreferredDevice(it) }
+            }
 
             audioTrack.write(samples, 0, numSamples)
             audioTrack.play()
