@@ -403,9 +403,40 @@ class CameraActivity : AppCompatActivity() {
                             val sizes = uvcCameraHelper?.getSupportedPreviewSizes()
                             val sizeStr = sizes?.joinToString(", ") { "${it.width}x${it.height}" } ?: "unknown"
                             android.util.Log.i("CameraActivity", "UVC supported sizes: $sizeStr")
+
+                            // Auto-detect portrait resolution from the camera.
+                            // If the camera advertises a portrait size (height > width),
+                            // switch to it so we get native 9:16 without cropping.
+                            val portraitSize = sizes?.filter { it.height > it.width }
+                                ?.maxByOrNull { it.width * it.height }
+                            if (portraitSize != null) {
+                                val curW = uvcCameraHelper?.previewWidth ?: 0
+                                val curH = uvcCameraHelper?.previewHeight ?: 0
+                                if (curW != portraitSize.width || curH != portraitSize.height) {
+                                    android.util.Log.i("CameraActivity", "Switching to portrait resolution: ${portraitSize.width}x${portraitSize.height}")
+                                    uvcCameraHelper?.updateResolution(portraitSize.width, portraitSize.height)
+                                }
+                            }
+
                             val actualW = uvcCameraHelper?.previewWidth ?: 0
                             val actualH = uvcCameraHelper?.previewHeight ?: 0
                             Toast.makeText(this@CameraActivity, "📷 USB conectada (${actualW}x${actualH})", Toast.LENGTH_SHORT).show()
+
+                            // Show supported resolutions in a dialog (visible on device without Logcat)
+                            val landscapeSizes = sizes?.filter { it.width >= it.height }
+                                ?.sortedByDescending { it.width * it.height }
+                                ?.joinToString("\n") { "  ${it.width}x${it.height}" } ?: "N/A"
+                            val portraitSizes = sizes?.filter { it.height > it.width }
+                                ?.sortedByDescending { it.width * it.height }
+                                ?.joinToString("\n") { "  ${it.width}x${it.height} ✅" } ?: "Ninguna"
+                            val dialogMsg = "Resolución actual: ${actualW}x${actualH}\n\n" +
+                                "— Landscape (16:9) —\n$landscapeSizes\n\n" +
+                                "— Portrait (9:16) —\n$portraitSizes"
+                            android.app.AlertDialog.Builder(this@CameraActivity)
+                                .setTitle("📷 Resoluciones UVC disponibles")
+                                .setMessage(dialogMsg)
+                                .setPositiveButton("OK", null)
+                                .show()
                             // Disable the library's aspect ratio constraint so the
                             // TextureView fills its MATCH_PARENT container.
                             // Setting 0.0 makes onMeasure skip the constraint.
@@ -1084,8 +1115,9 @@ class CameraActivity : AppCompatActivity() {
                     return
                 }
                 android.util.Log.i("CameraActivity", "UVC video file confirmed: ${actualFile.length()} bytes")
-                // Save UVC video to MediaStore gallery so it can be shared
-                saveUvcVideoToGallery(videoPath) { galleryUri ->
+                // Crop landscape UVC video to portrait 9:16 before saving
+                cropUvcVideoToPortrait(videoPath) { croppedPath ->
+                saveUvcVideoToGallery(croppedPath) { galleryUri ->
                     if (galleryUri == null) {
                         Toast.makeText(this@CameraActivity, "Error: no se pudo guardar el video", Toast.LENGTH_SHORT).show()
                         return@saveUvcVideoToGallery
@@ -1106,6 +1138,7 @@ class CameraActivity : AppCompatActivity() {
                         showPreview(null, uri)
                     }
                 }
+                } // end cropUvcVideoToPortrait
             }
         })
 
@@ -1170,6 +1203,55 @@ class CameraActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 android.util.Log.e("CameraActivity", "Error saving UVC video to gallery", e)
                 runOnUiThread { callback(null) }
+            }
+        }.start()
+    }
+
+    /**
+     * Crop a landscape UVC video to portrait 9:16 format.
+     * The DJI camera in 9:16 mode outputs 1920x1080 over UVC with the
+     * portrait content pillarboxed in the center. This extracts that
+     * center portion and scales to 1080x1920.
+     */
+    private fun cropUvcVideoToPortrait(inputPath: String, callback: (String) -> Unit) {
+        Thread {
+            try {
+                // Get source video dimensions
+                val probeSession = FFprobeKit.execute("-v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 \"$inputPath\"")
+                val output = probeSession.output?.trim() ?: ""
+                val parts = output.split(",")
+                val srcWidth = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: 0
+                val srcHeight = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: 0
+                android.util.Log.d("CameraActivity", "UVC video dimensions: ${srcWidth}x${srcHeight}")
+
+                // Only crop if video is landscape (wider than tall)
+                if (srcWidth <= srcHeight || srcWidth == 0) {
+                    android.util.Log.d("CameraActivity", "Video already portrait, skipping crop")
+                    runOnUiThread { callback(inputPath) }
+                    return@Thread
+                }
+
+                val outputFile = java.io.File(cacheDir, "cropped_${System.currentTimeMillis()}.mp4")
+                // Crop center 9:16 area and scale to 1080x1920
+                val cropW = (srcHeight * 9.0 / 16.0).toInt() / 2 * 2 // ensure even
+                val cropX = (srcWidth - cropW) / 2
+                val command = "-y -i \"$inputPath\" -vf \"crop=$cropW:$srcHeight:$cropX:0,scale=1080:1920:flags=lanczos\" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"${outputFile.absolutePath}\""
+
+                android.util.Log.d("CameraActivity", "Cropping UVC video to portrait: $command")
+                val session = FFmpegKit.execute(command)
+
+                if (ReturnCode.isSuccess(session.returnCode) && outputFile.exists() && outputFile.length() > 0) {
+                    android.util.Log.i("CameraActivity", "Video cropped to portrait: ${outputFile.length()} bytes")
+                    java.io.File(inputPath).delete()
+                    runOnUiThread { callback(outputFile.absolutePath) }
+                } else {
+                    android.util.Log.e("CameraActivity", "Portrait crop failed: ${session.output}")
+                    outputFile.delete()
+                    runOnUiThread { callback(inputPath) }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CameraActivity", "Error cropping video to portrait", e)
+                runOnUiThread { callback(inputPath) }
             }
         }.start()
     }
