@@ -91,6 +91,7 @@ class CameraActivity : AppCompatActivity() {
     private var faceFilterType = "none"
     private var faceFilterPath = ""
     private var cameraSource = "phone" // "phone" or "usb"
+    private var usbVerticalMode = false // true if user toggled DJI upright mode
     
     // UVC camera
     private var uvcCameraHelper: com.jiangdg.usbcamera.UVCCameraHelper? = null
@@ -185,6 +186,7 @@ class CameraActivity : AppCompatActivity() {
         faceFilterType = intent.getStringExtra("FACE_FILTER_TYPE") ?: "none"
         faceFilterPath = intent.getStringExtra("FACE_FILTER_PATH") ?: ""
         cameraSource = intent.getStringExtra("CAMERA_SOURCE") ?: "phone"
+        usbVerticalMode = intent.getBooleanExtra("USB_VERTICAL_MODE", false)
         
         // Update filter indicator
         updateFilterIndicator()
@@ -339,8 +341,11 @@ class CameraActivity : AppCompatActivity() {
             uvcTextureView = textureView
             val cameraView = textureView as com.serenegiant.usb.widget.CameraViewInterface
 
-            // DJI Osmo Pocket 3 outputs 1080p over UVC (4K is internal only)
-            uvcCameraHelper = com.jiangdg.usbcamera.UVCCameraHelper.getInstance(1920, 1080)
+            // When vertical mode is active: initialise with portrait dimensions so the DJI
+            // natively captures 1080x1920. Otherwise use standard landscape 1920x1080.
+            val initW = if (usbVerticalMode) 1080 else 1920
+            val initH = if (usbVerticalMode) 1920 else 1080
+            uvcCameraHelper = com.jiangdg.usbcamera.UVCCameraHelper.getInstance(initW, initH)
             uvcCameraHelper?.setDefaultFrameFormat(com.jiangdg.usbcamera.UVCCameraHelper.FRAME_FORMAT_MJPEG)
 
             cameraView.setCallback(object : com.serenegiant.usb.widget.CameraViewInterface.Callback {
@@ -1209,14 +1214,20 @@ class CameraActivity : AppCompatActivity() {
 
     /**
      * Crop a landscape UVC video to portrait 9:16 format.
-     * The DJI camera in 9:16 mode outputs 1920x1080 over UVC with the
-     * portrait content pillarboxed in the center. This extracts that
-     * center portion and scales to 1080x1920.
+     * When usbVerticalMode=true the Osmo always sends 1920x1080 (landscape) over UVC
+     * regardless of physical orientation, so we rotate 90° directly without probing.
      */
     private fun cropUvcVideoToPortrait(inputPath: String, callback: (String) -> Unit) {
         Thread {
             try {
-                // Get source video dimensions
+                // --- Vertical mode: camera records natively in portrait, nothing to do ---
+                if (usbVerticalMode) {
+                    android.util.Log.d("CameraActivity", "Vertical mode: saving native portrait video as-is")
+                    runOnUiThread { callback(inputPath) }
+                    return@Thread
+                }
+
+                // --- Normal mode: probe dimensions and crop to 9:16 center ---
                 val probeSession = FFprobeKit.execute("-v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 \"$inputPath\"")
                 val output = probeSession.output?.trim() ?: ""
                 val parts = output.split(",")
@@ -1224,7 +1235,6 @@ class CameraActivity : AppCompatActivity() {
                 val srcHeight = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: 0
                 android.util.Log.d("CameraActivity", "UVC video dimensions: ${srcWidth}x${srcHeight}")
 
-                // Only crop if video is landscape (wider than tall)
                 if (srcWidth <= srcHeight || srcWidth == 0) {
                     android.util.Log.d("CameraActivity", "Video already portrait, skipping crop")
                     runOnUiThread { callback(inputPath) }
@@ -1232,8 +1242,7 @@ class CameraActivity : AppCompatActivity() {
                 }
 
                 val outputFile = java.io.File(cacheDir, "cropped_${System.currentTimeMillis()}.mp4")
-                // Crop center 9:16 area and scale to 1080x1920
-                val cropW = (srcHeight * 9.0 / 16.0).toInt() / 2 * 2 // ensure even
+                val cropW = (srcHeight * 9.0 / 16.0).toInt() / 2 * 2
                 val cropX = (srcWidth - cropW) / 2
                 val command = "-y -i \"$inputPath\" -vf \"crop=$cropW:$srcHeight:$cropX:0,scale=1080:1920:flags=lanczos\" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a copy \"${outputFile.absolutePath}\""
 
@@ -1256,6 +1265,7 @@ class CameraActivity : AppCompatActivity() {
         }.start()
     }
 
+
     /**
      * Apply a centerCrop-style matrix to the UVC TextureView so the preview
      * fills the screen without distortion. This is display-only and does NOT
@@ -1270,20 +1280,21 @@ class CameraActivity : AppCompatActivity() {
         val bufferWidth = (uvcCameraHelper?.previewWidth ?: 1920).toFloat()
         val bufferHeight = (uvcCameraHelper?.previewHeight ?: 1080).toFloat()
 
-        // Without transform, the buffer is stretched non-uniformly to fill the view.
+        // Reset any previous rotation
+        tv.rotation = 0f
+        tv.scaleX = 1f
+        tv.scaleY = 1f
+
         // CenterCrop: scale uniformly so the buffer fills the view, cropping overflow.
         val scaleRatioX = viewWidth / bufferWidth
         val scaleRatioY = viewHeight / bufferHeight
         val maxScale = maxOf(scaleRatioX, scaleRatioY)
-
-        // Transform compensates for the non-uniform stretch
         val scaleX = maxScale / scaleRatioX
         val scaleY = maxScale / scaleRatioY
-
         val matrix = android.graphics.Matrix()
         matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
         tv.setTransform(matrix)
-        android.util.Log.d("CameraActivity", "CenterCrop: scaleX=$scaleX, scaleY=$scaleY, view=${viewWidth}x${viewHeight}, buffer=${bufferWidth}x${bufferHeight}")
+        android.util.Log.d("CameraActivity", "CenterCrop: view=${viewWidth}x${viewHeight}, buffer=${bufferWidth}x${bufferHeight}")
     }
 
     /** Force audio output to phone speaker when USB device hijacks audio routing */
