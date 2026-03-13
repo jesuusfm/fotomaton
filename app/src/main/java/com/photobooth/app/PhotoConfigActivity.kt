@@ -149,6 +149,7 @@ class PhotoConfigActivity : AppCompatActivity() {
             intent.putExtra("REMOVE_BG", removeBackground)
             intent.putExtra("CAMERA_SOURCE", cameraSource)
             intent.putExtra("USB_VERTICAL_MODE", usbVerticalMode)
+            
             startActivity(intent)
         }
     }

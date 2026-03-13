@@ -1100,6 +1100,29 @@ class CameraActivity : AppCompatActivity() {
             isVoiceClose = false
         }
 
+        // ── Maximize encoder quality via reflection ────────────────────────────────
+        // MediaVideoEncoder uses static FRAME_RATE=15 and BPP=0.5.
+        // We override them before startPusher() so the next encode session uses
+        // higher quality settings. FRAME_RATE=30 + BPP=1.25 → ~45 Mbps for 1080p.
+        try {
+            val encoderClass = Class.forName("com.serenegiant.usb.encoder.MediaVideoEncoder")
+            val fpsField = encoderClass.getDeclaredField("FRAME_RATE")
+            fpsField.isAccessible = true
+            // Strip final modifier
+            val modifiersField = java.lang.reflect.Field::class.java.getDeclaredField("modifiers")
+            modifiersField.isAccessible = true
+            modifiersField.setInt(fpsField, fpsField.modifiers and java.lang.reflect.Modifier.FINAL.inv())
+            fpsField.setInt(null, 30) // 15 → 30 fps
+
+            val bppField = encoderClass.getDeclaredField("BPP")
+            bppField.isAccessible = true
+            modifiersField.setInt(bppField, bppField.modifiers and java.lang.reflect.Modifier.FINAL.inv())
+            bppField.setFloat(null, 1.25f) // 0.5 → 1.25  (bitrate = 1.25 * w * h * 30 / 2 → ~39 Mbps for 1080x1920)
+            android.util.Log.i("CameraActivity", "MediaVideoEncoder quality patched: 30fps, BPP=1.25")
+        } catch (e: Throwable) {
+            android.util.Log.w("CameraActivity", "Quality patch failed (will use defaults): ${e.message}")
+        }
+
         uvcCameraHelper?.startPusher(params, object : com.serenegiant.usb.common.AbstractUVCCameraHandler.OnEncodeResultListener {
             override fun onEncodeResult(data: ByteArray?, offset: Int, length: Int, timestamp: Long, type: Int) {
                 // Encoding in progress - nothing needed here
